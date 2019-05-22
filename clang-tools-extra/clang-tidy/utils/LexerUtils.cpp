@@ -47,6 +47,9 @@ SourceLocation findPreviousTokenKind(SourceLocation Start,
                                      const SourceManager &SM,
                                      const LangOptions &LangOpts,
                                      tok::TokenKind TK) {
+  if (Start.isInvalid() || Start.isMacroID())
+    return SourceLocation();
+
   while (true) {
     SourceLocation L = findPreviousTokenStart(Start, SM, LangOpts);
     if (L.isInvalid() || L.isMacroID())

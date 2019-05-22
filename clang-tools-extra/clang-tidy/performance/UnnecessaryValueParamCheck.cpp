@@ -163,7 +163,7 @@ void UnnecessaryValueParamCheck::check(const MatchFinder::MatchResult &Result) {
     // whether it is const or not as constness can differ between definition and
     // declaration.
     if (!CurrentParam.getType().getCanonicalType().isConstQualified())
-      Diag << utils::fixit::changeVarDeclToConst(CurrentParam);
+      Diag << *utils::fixit::addQualifierToVarDecl(CurrentParam, DeclSpec::TQ::TQ_const);
   }
 }
 
