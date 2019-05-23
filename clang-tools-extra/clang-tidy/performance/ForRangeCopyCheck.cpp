@@ -78,7 +78,7 @@ bool ForRangeCopyCheck::handleConstValueCopy(const VarDecl &LoopVar,
            "copy in each iteration; consider making this a reference")
       << utils::fixit::changeVarDeclToReference(LoopVar, Context);
   if (!LoopVar.getType().isConstQualified())
-    Diagnostic << utils::fixit::changeVarDeclToConst(LoopVar);
+    Diagnostic << *utils::fixit::changeVarDeclToConst(LoopVar);
   return true;
 }
 
@@ -104,7 +104,7 @@ bool ForRangeCopyCheck::handleCopyIsOnlyConstReferenced(
     diag(LoopVar.getLocation(),
          "loop variable is copied but only used as const reference; consider "
          "making it a const reference")
-        << utils::fixit::changeVarDeclToConst(LoopVar)
+        << *utils::fixit::changeVarDeclToConst(LoopVar)
         << utils::fixit::changeVarDeclToReference(LoopVar, Context);
     return true;
   }
