@@ -55,20 +55,6 @@ SymbolContext::SymbolContext(SymbolContextScope *sc_scope)
 
 SymbolContext::~SymbolContext() {}
 
-const SymbolContext &SymbolContext::operator=(const SymbolContext &rhs) {
-  if (this != &rhs) {
-    target_sp = rhs.target_sp;
-    module_sp = rhs.module_sp;
-    comp_unit = rhs.comp_unit;
-    function = rhs.function;
-    block = rhs.block;
-    line_entry = rhs.line_entry;
-    symbol = rhs.symbol;
-    variable = rhs.variable;
-  }
-  return *this;
-}
-
 void SymbolContext::Clear(bool clear_target) {
   if (clear_target)
     target_sp.reset();
@@ -494,7 +480,8 @@ bool SymbolContext::GetParentOfInlinedScope(const Address &curr_frame_pc,
         Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_SYMBOLS));
 
         if (log) {
-          log->Printf(
+          LLDB_LOGF(
+              log,
               "warning: inlined block 0x%8.8" PRIx64
               " doesn't have a range that contains file address 0x%" PRIx64,
               curr_inlined_block->GetID(), curr_frame_pc.GetFileAddress());
@@ -503,12 +490,8 @@ bool SymbolContext::GetParentOfInlinedScope(const Address &curr_frame_pc,
         else {
           ObjectFile *objfile = nullptr;
           if (module_sp) {
-            SymbolVendor *symbol_vendor = module_sp->GetSymbolVendor();
-            if (symbol_vendor) {
-              SymbolFile *symbol_file = symbol_vendor->GetSymbolFile();
-              if (symbol_file)
-                objfile = symbol_file->GetObjectFile();
-            }
+            if (SymbolFile *symbol_file = module_sp->GetSymbolFile())
+              objfile = symbol_file->GetObjectFile();
           }
           if (objfile) {
             Host::SystemLog(
@@ -762,9 +745,8 @@ bool SymbolContext::GetAddressRangeFromHereToEndLine(uint32_t end_line,
   }
 
   Block *func_block = GetFunctionBlock();
-  if (func_block &&
-      func_block->GetRangeIndexContainingAddress(
-          end_entry.range.GetBaseAddress()) == UINT32_MAX) {
+  if (func_block && func_block->GetRangeIndexContainingAddress(
+                        end_entry.range.GetBaseAddress()) == UINT32_MAX) {
     error.SetErrorStringWithFormat(
         "end line number %d is not contained within the current function.",
         end_line);
@@ -777,8 +759,8 @@ bool SymbolContext::GetAddressRangeFromHereToEndLine(uint32_t end_line,
   return true;
 }
 
-const Symbol *
-SymbolContext::FindBestGlobalDataSymbol(ConstString name, Status &error) {
+const Symbol *SymbolContext::FindBestGlobalDataSymbol(ConstString name,
+                                                      Status &error) {
   error.Clear();
 
   if (!target_sp) {
@@ -788,8 +770,9 @@ SymbolContext::FindBestGlobalDataSymbol(ConstString name, Status &error) {
   Target &target = *target_sp;
   Module *module = module_sp.get();
 
-  auto ProcessMatches = [this, &name, &target, module]
-  (SymbolContextList &sc_list, Status &error) -> const Symbol* {
+  auto ProcessMatches = [this, &name, &target,
+                         module](SymbolContextList &sc_list,
+                                 Status &error) -> const Symbol * {
     llvm::SmallVector<const Symbol *, 1> external_symbols;
     llvm::SmallVector<const Symbol *, 1> internal_symbols;
     const uint32_t matches = sc_list.GetSize();
@@ -802,77 +785,77 @@ SymbolContext::FindBestGlobalDataSymbol(ConstString name, Status &error) {
 
         if (sym_address.IsValid()) {
           switch (symbol->GetType()) {
-            case eSymbolTypeData:
-            case eSymbolTypeRuntime:
-            case eSymbolTypeAbsolute:
-            case eSymbolTypeObjCClass:
-            case eSymbolTypeObjCMetaClass:
-            case eSymbolTypeObjCIVar:
-              if (symbol->GetDemangledNameIsSynthesized()) {
-                // If the demangled name was synthesized, then don't use it for
-                // expressions. Only let the symbol match if the mangled named
-                // matches for these symbols.
-                if (symbol->GetMangled().GetMangledName() != name)
-                  break;
-              }
-              if (symbol->IsExternal()) {
-                external_symbols.push_back(symbol);
-              } else {
-                internal_symbols.push_back(symbol);
-              }
-              break;
-            case eSymbolTypeReExported: {
-              ConstString reexport_name = symbol->GetReExportedSymbolName();
-              if (reexport_name) {
-                ModuleSP reexport_module_sp;
-                ModuleSpec reexport_module_spec;
-                reexport_module_spec.GetPlatformFileSpec() =
-                symbol->GetReExportedSymbolSharedLibrary();
-                if (reexport_module_spec.GetPlatformFileSpec()) {
-                  reexport_module_sp =
-                  target.GetImages().FindFirstModule(reexport_module_spec);
-                  if (!reexport_module_sp) {
-                    reexport_module_spec.GetPlatformFileSpec()
-                    .GetDirectory()
-                    .Clear();
-                    reexport_module_sp =
+          case eSymbolTypeData:
+          case eSymbolTypeRuntime:
+          case eSymbolTypeAbsolute:
+          case eSymbolTypeObjCClass:
+          case eSymbolTypeObjCMetaClass:
+          case eSymbolTypeObjCIVar:
+            if (symbol->GetDemangledNameIsSynthesized()) {
+              // If the demangled name was synthesized, then don't use it for
+              // expressions. Only let the symbol match if the mangled named
+              // matches for these symbols.
+              if (symbol->GetMangled().GetMangledName() != name)
+                break;
+            }
+            if (symbol->IsExternal()) {
+              external_symbols.push_back(symbol);
+            } else {
+              internal_symbols.push_back(symbol);
+            }
+            break;
+          case eSymbolTypeReExported: {
+            ConstString reexport_name = symbol->GetReExportedSymbolName();
+            if (reexport_name) {
+              ModuleSP reexport_module_sp;
+              ModuleSpec reexport_module_spec;
+              reexport_module_spec.GetPlatformFileSpec() =
+                  symbol->GetReExportedSymbolSharedLibrary();
+              if (reexport_module_spec.GetPlatformFileSpec()) {
+                reexport_module_sp =
                     target.GetImages().FindFirstModule(reexport_module_spec);
-                  }
+                if (!reexport_module_sp) {
+                  reexport_module_spec.GetPlatformFileSpec()
+                      .GetDirectory()
+                      .Clear();
+                  reexport_module_sp =
+                      target.GetImages().FindFirstModule(reexport_module_spec);
                 }
-                // Don't allow us to try and resolve a re-exported symbol if it
-                // is the same as the current symbol
-                if (name == symbol->GetReExportedSymbolName() &&
-                    module == reexport_module_sp.get())
-                  return nullptr;
-
-                return FindBestGlobalDataSymbol(
-                    symbol->GetReExportedSymbolName(), error);
               }
-            } break;
+              // Don't allow us to try and resolve a re-exported symbol if it
+              // is the same as the current symbol
+              if (name == symbol->GetReExportedSymbolName() &&
+                  module == reexport_module_sp.get())
+                return nullptr;
 
-            case eSymbolTypeCode: // We already lookup functions elsewhere
-            case eSymbolTypeVariable:
-            case eSymbolTypeLocal:
-            case eSymbolTypeParam:
-            case eSymbolTypeTrampoline:
-            case eSymbolTypeInvalid:
-            case eSymbolTypeException:
-            case eSymbolTypeSourceFile:
-            case eSymbolTypeHeaderFile:
-            case eSymbolTypeObjectFile:
-            case eSymbolTypeCommonBlock:
-            case eSymbolTypeBlock:
-            case eSymbolTypeVariableType:
-            case eSymbolTypeLineEntry:
-            case eSymbolTypeLineHeader:
-            case eSymbolTypeScopeBegin:
-            case eSymbolTypeScopeEnd:
-            case eSymbolTypeAdditional:
-            case eSymbolTypeCompiler:
-            case eSymbolTypeInstrumentation:
-            case eSymbolTypeUndefined:
-            case eSymbolTypeResolver:
-              break;
+              return FindBestGlobalDataSymbol(symbol->GetReExportedSymbolName(),
+                                              error);
+            }
+          } break;
+
+          case eSymbolTypeCode: // We already lookup functions elsewhere
+          case eSymbolTypeVariable:
+          case eSymbolTypeLocal:
+          case eSymbolTypeParam:
+          case eSymbolTypeTrampoline:
+          case eSymbolTypeInvalid:
+          case eSymbolTypeException:
+          case eSymbolTypeSourceFile:
+          case eSymbolTypeHeaderFile:
+          case eSymbolTypeObjectFile:
+          case eSymbolTypeCommonBlock:
+          case eSymbolTypeBlock:
+          case eSymbolTypeVariableType:
+          case eSymbolTypeLineEntry:
+          case eSymbolTypeLineHeader:
+          case eSymbolTypeScopeBegin:
+          case eSymbolTypeScopeEnd:
+          case eSymbolTypeAdditional:
+          case eSymbolTypeCompiler:
+          case eSymbolTypeInstrumentation:
+          case eSymbolTypeUndefined:
+          case eSymbolTypeResolver:
+            break;
           }
         }
       }
@@ -932,7 +915,6 @@ SymbolContext::FindBestGlobalDataSymbol(ConstString name, Status &error) {
 
   return nullptr; // no error; we just didn't find anything
 }
-
 
 //
 //  SymbolContextSpecifier
@@ -1295,6 +1277,8 @@ bool SymbolContextList::RemoveContextAtIndex(size_t idx) {
 }
 
 uint32_t SymbolContextList::GetSize() const { return m_symbol_contexts.size(); }
+
+bool SymbolContextList::IsEmpty() const { return m_symbol_contexts.empty(); }
 
 uint32_t SymbolContextList::NumLineEntriesWithLine(uint32_t line) const {
   uint32_t match_count = 0;

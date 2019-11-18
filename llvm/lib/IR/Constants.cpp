@@ -22,6 +22,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/IR/PatternMatch.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ManagedStatic.h"
@@ -30,6 +31,7 @@
 #include <algorithm>
 
 using namespace llvm;
+using namespace PatternMatch;
 
 //===----------------------------------------------------------------------===//
 //                              Constant Class
@@ -248,6 +250,19 @@ bool Constant::isNaN() const {
       return false;
   }
   return true;
+}
+
+bool Constant::isElementWiseEqual(Value *Y) const {
+  // Are they fully identical?
+  if (this == Y)
+    return true;
+  // They may still be identical element-wise (if they have `undef`s).
+  auto *Cy = dyn_cast<Constant>(Y);
+  if (!Cy)
+    return false;
+  return match(ConstantExpr::getICmp(ICmpInst::Predicate::ICMP_EQ,
+                                     const_cast<Constant *>(this), Cy),
+               m_One());
 }
 
 bool Constant::containsUndefElement() const {
@@ -521,10 +536,8 @@ bool Constant::needsRelocation() const {
           return false;
 
         // Relative pointers do not need to be dynamically relocated.
-        if (auto *LHSGV = dyn_cast<GlobalValue>(
-                LHSOp0->stripPointerCastsNoFollowAliases()))
-          if (auto *RHSGV = dyn_cast<GlobalValue>(
-                  RHSOp0->stripPointerCastsNoFollowAliases()))
+        if (auto *LHSGV = dyn_cast<GlobalValue>(LHSOp0->stripPointerCasts()))
+          if (auto *RHSGV = dyn_cast<GlobalValue>(RHSOp0->stripPointerCasts()))
             if (LHSGV->isDSOLocal() && RHSGV->isDSOLocal())
               return false;
       }
@@ -575,16 +588,35 @@ void Constant::removeDeadConstantUsers() const {
     }
 
     // If the constant was dead, then the iterator is invalidated.
-    if (LastNonDeadUser == E) {
+    if (LastNonDeadUser == E)
       I = user_begin();
-      if (I == E) break;
-    } else {
-      I = LastNonDeadUser;
-      ++I;
-    }
+    else
+      I = std::next(LastNonDeadUser);
   }
 }
 
+Constant *Constant::replaceUndefsWith(Constant *C, Constant *Replacement) {
+  assert(C && Replacement && "Expected non-nullptr constant arguments");
+  Type *Ty = C->getType();
+  if (match(C, m_Undef())) {
+    assert(Ty == Replacement->getType() && "Expected matching types");
+    return Replacement;
+  }
+
+  // Don't know how to deal with this constant.
+  if (!Ty->isVectorTy())
+    return C;
+
+  unsigned NumElts = Ty->getVectorNumElements();
+  SmallVector<Constant *, 32> NewC(NumElts);
+  for (unsigned i = 0; i != NumElts; ++i) {
+    Constant *EltC = C->getAggregateElement(i);
+    assert((!EltC || EltC->getType() == Replacement->getType()) &&
+           "Expected matching types");
+    NewC[i] = EltC && match(EltC, m_Undef()) ? Replacement : EltC;
+  }
+  return ConstantVector::get(NewC);
+}
 
 
 //===----------------------------------------------------------------------===//
@@ -2972,7 +3004,7 @@ Value *ConstantExpr::handleOperandChangeImpl(Value *From, Value *ToV) {
       NewOps, this, From, To, NumUpdated, OperandNo);
 }
 
-Instruction *ConstantExpr::getAsInstruction() {
+Instruction *ConstantExpr::getAsInstruction() const {
   SmallVector<Value *, 4> ValueOperands(op_begin(), op_end());
   ArrayRef<Value*> Ops(ValueOperands);
 

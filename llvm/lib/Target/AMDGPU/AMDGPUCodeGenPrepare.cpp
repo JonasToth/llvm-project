@@ -38,6 +38,7 @@
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Value.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
 #include <cassert>
@@ -52,6 +53,12 @@ namespace {
 static cl::opt<bool> WidenLoads(
   "amdgpu-codegenprepare-widen-constant-loads",
   cl::desc("Widen sub-dword constant address space loads in AMDGPUCodeGenPrepare"),
+  cl::ReallyHidden,
+  cl::init(true));
+
+static cl::opt<bool> UseMul24Intrin(
+  "amdgpu-codegenprepare-mul24",
+  cl::desc("Introduce mul24 intrinsics in AMDGPUCodeGenPrepare"),
   cl::ReallyHidden,
   cl::init(true));
 
@@ -509,7 +516,9 @@ bool AMDGPUCodeGenPrepare::replaceMulWithMul24(BinaryOperator &I) const {
     }
   }
 
-  I.replaceAllUsesWith(insertValues(Builder, Ty, ResultVals));
+  Value *NewVal = insertValues(Builder, Ty, ResultVals);
+  NewVal->takeName(&I);
+  I.replaceAllUsesWith(NewVal);
   I.eraseFromParent();
 
   return true;
@@ -879,7 +888,7 @@ bool AMDGPUCodeGenPrepare::visitBinaryOperator(BinaryOperator &I) {
       DA->isUniform(&I) && promoteUniformOpToI32(I))
     return true;
 
-  if (replaceMulWithMul24(I))
+  if (UseMul24Intrin && replaceMulWithMul24(I))
     return true;
 
   bool Changed = false;

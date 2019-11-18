@@ -22,7 +22,7 @@ void recordFixes(const VarDecl &Var, ASTContext &Context,
                  DiagnosticBuilder &Diagnostic) {
   Diagnostic << utils::fixit::changeVarDeclToReference(Var, Context);
   if (!Var.getType().isLocalConstQualified())
-    Diagnostic << *utils::fixit::changeVarDeclToConst(Var);
+    Diagnostic << *utils::fixit::addQualifierToVarDecl(Var, DeclSpec::TQ::TQ_const);
 }
 
 } // namespace

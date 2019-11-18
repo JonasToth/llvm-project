@@ -13,7 +13,6 @@
 #include <string>
 #include <vector>
 
-#include "lldb/Core/ClangForward.h"
 #include "lldb/lldb-private.h"
 #include "llvm/ADT/APSInt.h"
 
@@ -32,7 +31,6 @@ class CompilerType {
 public:
   // Constructors and Destructors
   CompilerType(TypeSystem *type_system, lldb::opaque_compiler_type_t type);
-  CompilerType(clang::ASTContext *ast_context, clang::QualType qual_type);
 
   CompilerType(const CompilerType &rhs)
       : m_type(rhs.m_type), m_type_system(rhs.m_type_system) {}
@@ -110,11 +108,6 @@ public:
 
   bool IsPolymorphicClass() const;
 
-  bool
-  IsPossibleCPlusPlusDynamicType(CompilerType *target_type = nullptr) const {
-    return IsPossibleDynamicType(target_type, true, false);
-  }
-
   bool IsPossibleDynamicType(CompilerType *target_type, // Can pass nullptr
                              bool check_cplusplus, bool check_objc) const;
 
@@ -168,8 +161,6 @@ public:
 
   void SetCompilerType(TypeSystem *type_system,
                        lldb::opaque_compiler_type_t type);
-
-  void SetCompilerType(clang::ASTContext *ast, clang::QualType qual_type);
 
   unsigned GetTypeQualifiers() const;
 
@@ -257,7 +248,7 @@ public:
 
   lldb::Format GetFormat() const;
 
-  size_t GetTypeBitAlign() const;
+  llvm::Optional<size_t> GetTypeBitAlign(ExecutionContextScope *exe_scope) const;
 
   uint32_t GetNumChildren(bool omit_empty_base_classes,
                           const ExecutionContext *exe_ctx) const;
@@ -335,13 +326,6 @@ public:
   LazyBool ShouldPrintAsOneLiner(ValueObject *valobj) const;
 
   bool IsMeaninglessWithoutDynamicResolution() const;
-
-  // Pointers & References
-
-  // Converts "s" to a floating point value and place resulting floating point
-  // bytes in the "dst" buffer.
-  size_t ConvertStringToFloatValue(const char *s, uint8_t *dst,
-                                   size_t dst_size) const;
 
   // Dumping types
 

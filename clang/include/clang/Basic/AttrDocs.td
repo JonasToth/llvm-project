@@ -258,7 +258,9 @@ def C11NoReturnDocs : Documentation {
   let Content = [{
 A function declared as ``_Noreturn`` shall not return to its caller. The
 compiler will generate a diagnostic for a function declared as ``_Noreturn``
-that appears to be capable of returning to its caller.
+that appears to be capable of returning to its caller. Despite being a type
+specifier, the ``_Noreturn`` attribute cannot be specified on a function
+pointer type.
   }];
 }
 
@@ -1408,15 +1410,17 @@ all optional, but the attribute has to have at least one clause.
   }];
 }
 
-def RequireConstantInitDocs : Documentation {
+def ConstInitDocs : Documentation {
   let Category = DocCatVariable;
+  let Heading = "require_constant_initialization, constinit (C++20)";
   let Content = [{
 This attribute specifies that the variable to which it is attached is intended
 to have a `constant initializer <http://en.cppreference.com/w/cpp/language/constant_initialization>`_
 according to the rules of [basic.start.static]. The variable is required to
 have static or thread storage duration. If the initialization of the variable
 is not a constant initializer an error will be produced. This attribute may
-only be used in C++.
+only be used in C++; the ``constinit`` spelling is only accepted in C++20
+onwards.
 
 Note that in C++03 strict constant expression checking is not done. Instead
 the attribute reports if Clang can emit the variable as a constant, even if it's
@@ -1430,6 +1434,12 @@ This attribute acts as a compile time assertion that the requirements
 for constant initialization have been met. Since these requirements change
 between dialects and have subtle pitfalls it's important to fail fast instead
 of silently falling back on dynamic initialization.
+
+The first use of the attribute on a variable must be part of, or precede, the
+initializing declaration of the variable. C++20 requires the ``constinit``
+spelling of the attribute to be present on the initializing declaration if it
+is used anywhere. The other spellings can be specified on a forward declaration
+and omitted on a later initializing declaration.
 
 .. code-block:: c++
 
@@ -1500,6 +1510,33 @@ in any resulting diagnostics.
   }
   error_info &foo();
   void f() { foo(); } // Does not diagnose, error_info is a reference.
+
+Additionally, discarded temporaries resulting from a call to a constructor
+marked with ``[[nodiscard]]`` or a constructor of a type marked
+``[[nodiscard]]`` will also diagnose. This also applies to type conversions that
+use the annotated ``[[nodiscard]]`` constructor or result in an annotated type.
+
+.. code-block: c++
+  struct [[nodiscard]] marked_type {/*..*/ };
+  struct marked_ctor {
+    [[nodiscard]] marked_ctor();
+    marked_ctor(int);
+  };
+
+  struct S {
+    operator marked_type() const;
+    [[nodiscard]] operator int() const;
+  };
+
+  void usages() {
+    marked_type(); // diagnoses.
+    marked_ctor(); // diagnoses.
+    marked_ctor(3); // Does not diagnose, int constructor isn't marked nodiscard.
+
+    S s;
+    static_cast<marked_type>(s); // diagnoses
+    (int)s; // diagnoses
+  }
   }];
 }
 
@@ -1594,6 +1631,17 @@ The semantics are as follows:
   handler, where the offset from "lr" to the preferred return address depends on
   the execution state of the code which generated the exception. In this case
   a sequence equivalent to "movs pc, lr" will be used.
+  }];
+}
+
+def BPFPreserveAccessIndexDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+Clang supports the ``__attribute__((preserve_access_index))``
+attribute for the BPF target. This attribute may be attached to a
+struct or union declaration, where if -g is specified, it enables
+preserving struct or union member access debuginfo indicies of this
+struct or union, similar to clang ``__builtin_preserve_acceess_index()``.
   }];
 }
 
@@ -1757,6 +1805,10 @@ The current set of options correspond to the existing "subtarget features" for
 the target with or without a "-mno-" in front corresponding to the absence
 of the feature, as well as ``arch="CPU"`` which will change the default "CPU"
 for the function.
+
+For AArch64, the attribute also allows the "branch-protection=<args>" option,
+where the permissible arguments and their effect on code generation are the same
+as for the command-line option ``-mbranch-protection``.
 
 Example "subtarget features" from the x86 backend include: "mmx", "sse", "sse4.2",
 "avx", "xop" and largely correspond to the machine specific options handled by
@@ -2194,6 +2246,18 @@ to avoid false positives in other places.
   }];
 }
 
+def CFICanonicalJumpTableDocs : Documentation {
+  let Category = DocCatFunction;
+  let Heading = "cfi_canonical_jump_table";
+  let Content = [{
+.. _langext-cfi_canonical_jump_table:
+
+Use ``__attribute__((cfi_canonical_jump_table))`` on a function declaration to
+make the function's CFI jump table canonical. See :ref:`the CFI documentation
+<cfi-canonical-jump-tables>` for more details.
+  }];
+}
+
 def DocCatTypeSafety : DocumentationCategory<"Type Safety Checking"> {
   let Content = [{
 Clang supports additional attributes to enable checking type safety properties
@@ -2511,6 +2575,30 @@ manipulating bits of the enumerator when issuing warnings.
   }];
 }
 
+def AsmLabelDocs : Documentation {
+  let Category = DocCatDecl;
+  let Content = [{
+This attribute can be used on a function or variable to specify its symbol name.
+
+On some targets, all C symbols are prefixed by default with a single character, typically ``_``.  This was done historically to distinguish them from symbols used by other languages.  (This prefix is also added to the standard Itanium C++ ABI prefix on "mangled" symbol names, so that e.g. on such targets the true symbol name for a C++ variable declared as ``int cppvar;`` would be ``__Z6cppvar``; note the two underscores.)  This prefix is *not* added to the symbol names specified by the ``asm`` attribute; programmers wishing to match a C symbol name must compensate for this.
+
+For example, consider the following C code:
+
+.. code-block:: c
+
+  int var1 asm("altvar") = 1;  // "altvar" in symbol table.
+  int var2 = 1; // "_var2" in symbol table.
+
+  void func1(void) asm("altfunc");
+  void func1(void) {} // "altfunc" in symbol table.
+  void func2(void) {} // "_func2" in symbol table.
+
+Clang's implementation of this attribute is compatible with GCC's, `documented here <https://gcc.gnu.org/onlinedocs/gcc/Asm-Labels.html>`_.
+
+While it is possible to use this attribute to name a special symbol used internally by the compiler, such as an LLVM intrinsic, this is neither recommended nor supported and may cause the compiler to crash or miscompile.  Users who wish to gain access to intrinsic behavior are strongly encouraged to request new builtin functions.
+  }];
+}
+
 def EnumExtensibilityDocs : Documentation {
   let Category = DocCatDecl;
   let Content = [{
@@ -2590,7 +2678,7 @@ is retained by the return value of the annotated function
 It is only supported in C++.
 
 This attribute provides an experimental implementation of the facility
-described in the C++ committee paper [http://wg21.link/p0936r0](P0936R0),
+described in the C++ committee paper `P0936R0 <http://wg21.link/p0936r0>`_,
 and is subject to change as the design of the corresponding functionality
 changes.
   }];
@@ -2716,9 +2804,10 @@ def LoopHintDocs : Documentation {
   let Content = [{
 The ``#pragma clang loop`` directive allows loop optimization hints to be
 specified for the subsequent loop. The directive allows pipelining to be
-disabled, or vectorization, interleaving, and unrolling to be enabled or disabled.
-Vector width, interleave count, unrolling count, and the initiation interval
-for pipelining can be explicitly specified. See `language extensions
+disabled, or vectorization, vector predication, interleaving, and unrolling to
+be enabled or disabled. Vector width, vector predication, interleave count,
+unrolling count, and the initiation interval for pipelining can be explicitly
+specified. See `language extensions
 <http://clang.llvm.org/docs/LanguageExtensions.html#extensions-for-loop-hint-optimizations>`_
 for details.
   }];
@@ -3136,6 +3225,55 @@ The syntax of the declare target directive is as follows:
     #pragma omp declare target new-line
     declarations-definition-seq
     #pragma omp end declare target new-line
+
+or
+
+  .. code-block:: c
+
+    #pragma omp declare target (extended-list) new-line
+
+or
+
+  .. code-block:: c
+
+    #pragma omp declare target clause[ [,] clause ... ] new-line
+
+where clause is one of the following:
+
+
+  .. code-block:: c
+
+     to(extended-list)
+     link(list)
+     device_type(host | nohost | any)
+  }];
+}
+
+def OMPDeclareVariantDocs : Documentation {
+  let Category = DocCatFunction;
+  let Heading = "#pragma omp declare variant";
+  let Content = [{
+The `declare variant` directive declares a specialized variant of a base
+ function and specifies the context in which that specialized variant is used.
+ The declare variant directive is a declarative directive.
+The syntax of the `declare variant` construct is as follows:
+
+  .. code-block:: none
+
+    #pragma omp declare variant(variant-func-id) clause new-line
+    [#pragma omp declare variant(variant-func-id) clause new-line]
+    [...]
+    function definition or declaration
+
+where clause is one of the following:
+
+  .. code-block:: none
+
+    match(context-selector-specification)
+
+and where `variant-func-id` is the name of a function variant that is either a
+ base language identifier or, for C++, a template-id.
+
   }];
 }
 
@@ -4200,5 +4338,132 @@ to indicate it is a HIP pinned shadow variable. A HIP pinned shadow variable can
 be accessed on both device side and host side. It has external linkage and is
 not initialized on device side. It has internal linkage and is initialized by
 the initializer on host side.
+  }];
+}
+
+def LifetimeOwnerDocs : Documentation {
+  let Category = DocCatDecl;
+  let Content = [{
+.. Note:: This attribute is experimental and its effect on analysis is subject to change in
+  a future version of clang.
+
+The attribute ``[[gsl::Owner(T)]]`` applies to structs and classes that own an
+object of type ``T``:
+
+.. code-block:: c++
+
+  class [[gsl::Owner(int)]] IntOwner {
+  private:
+    int value;
+  public:
+    int *getInt() { return &value; }
+  };
+
+The argument ``T`` is optional and is ignored.
+This attribute may be used by analysis tools and has no effect on code
+generation.
+
+See Pointer_ for an example.
+}];
+}
+
+def LifetimePointerDocs : Documentation {
+  let Category = DocCatDecl;
+  let Content = [{
+.. Note:: This attribute is experimental and its effect on analysis is subject to change in
+  a future version of clang.
+
+The attribute ``[[gsl::Pointer(T)]]`` applies to structs and classes that behave
+like pointers to an object of type ``T``:
+
+.. code-block:: c++
+
+  class [[gsl::Pointer(int)]] IntPointer {
+  private:
+    int *valuePointer;
+  public:
+    int *getInt() { return &valuePointer; }
+  };
+
+The argument ``T`` is optional and is ignored.
+This attribute may be used by analysis tools and has no effect on code
+generation.
+
+Example:
+When constructing an instance of a class annotated like this (a Pointer) from
+an instance of a class annotated with ``[[gsl::Owner]]`` (an Owner),
+then the analysis will consider the Pointer to point inside the Owner.
+When the Owner's lifetime ends, it will consider the Pointer to be dangling.
+
+.. code-block:: c++
+
+  int f() {
+    IntPointer P;
+    if (true) {
+      IntOwner O(7);
+      P = IntPointer(O); // P "points into" O
+    } // P is dangling
+    return P.get(); // error: Using a dangling Pointer.
+  }
+
+}];
+}
+
+def ArmMveAliasDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+This attribute is used in the implementation of the ACLE intrinsics
+for the Arm MVE instruction set. It allows the intrinsic functions to
+be declared using the names defined in ACLE, and still be recognized
+as clang builtins equivalent to the underlying name. For example,
+``arm_mve.h`` declares the function ``vaddq_u32`` with
+``__attribute__((__clang_arm_mve_alias(__builtin_arm_mve_vaddq_u32)))``,
+and similarly, one of the type-overloaded declarations of ``vaddq``
+will have the same attribute. This ensures that both functions are
+recognized as that clang builtin, and in the latter case, the choice
+of which builtin to identify the function as can be deferred until
+after overload resolution.
+
+This attribute can only be used to set up the aliases for the MVE
+intrinsic functions; it is intended for use only inside ``arm_mve.h``,
+and is not a general mechanism for declaring arbitrary aliases for
+clang builtin functions.
+  }];
+}
+
+def NoBuiltinDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+.. Note:: This attribute is not yet fully implemented, it is validated but has
+no effect on the generated code.
+
+The ``__attribute__((no_builtin))`` is similar to the ``-fno-builtin`` flag
+except it is specific to the body of a function. The attribute may also be
+applied to a virtual function but has no effect on the behavior of overriding
+functions in a derived class.
+
+It accepts one or more strings corresponding to the specific names of the
+builtins to disable (e.g. "memcpy", "memset").
+If the attribute is used without parameters it will disable all buitins at
+once.
+
+.. code-block:: c++
+
+  // The compiler is not allowed to add any builtin to foo's body.
+  void foo(char* data, size_t count) __attribute__((no_builtin)) {
+    // The compiler is not allowed to convert the loop into
+    // `__builtin_memset(data, 0xFE, count);`.
+    for (size_t i = 0; i < count; ++i)
+      data[i] = 0xFE;
+  }
+
+  // The compiler is not allowed to add the `memcpy` builtin to bar's body.
+  void bar(char* data, size_t count) __attribute__((no_builtin("memcpy"))) {
+    // The compiler is allowed to convert the loop into
+    // `__builtin_memset(data, 0xFE, count);` but cannot generate any
+    // `__builtin_memcpy`
+    for (size_t i = 0; i < count; ++i)
+      data[i] = 0xFE;
+  }
   }];
 }

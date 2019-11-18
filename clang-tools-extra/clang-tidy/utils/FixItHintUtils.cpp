@@ -73,23 +73,37 @@ static Optional<FixItHint> fixIfNotDangerous(SourceLocation Loc,
   return FixItHint::CreateInsertion(Loc, Text);
 }
 
-static Optional<FixItHint> changeValue(const VarDecl &Var, ConstTarget CT,
-                                       ConstPolicy CP,
+// Build a string that can be emitted as FixIt with either a space in before
+// or after the qualifier, either ' const' or 'const '.
+static std::string buildQualifier(DeclSpec::TQ Qualifier,
+                                  bool WhitespaceBefore = false) {
+  if (WhitespaceBefore)
+    return (llvm::Twine(' ') + DeclSpec::getSpecifierName(Qualifier)).str();
+  return (llvm::Twine(DeclSpec::getSpecifierName(Qualifier)) + llvm::Twine(' '))
+      .str();
+}
+
+static Optional<FixItHint> changeValue(const VarDecl &Var,
+                                       DeclSpec::TQ Qualifier,
+                                       QualifierTarget QualTarget,
+                                       QualifierPolicy QualPolicy,
                                        const ASTContext &Context) {
-  switch (CP) {
-  case ConstPolicy::Left:
-    return fixIfNotDangerous(Var.getTypeSpecStartLoc(), "const ");
-  case ConstPolicy::Right:
+  switch (QualPolicy) {
+  case QualifierPolicy::Left:
+    return fixIfNotDangerous(Var.getTypeSpecStartLoc(),
+                             buildQualifier(Qualifier));
+  case QualifierPolicy::Right:
     Optional<SourceLocation> IgnoredParens =
         skipLParensBackwards(Var.getLocation(), Context);
 
     if (IgnoredParens)
-      return fixIfNotDangerous(*IgnoredParens, "const ");
+      return fixIfNotDangerous(*IgnoredParens, buildQualifier(Qualifier));
     return None;
   }
 }
 
 static Optional<FixItHint> changePointerItself(const VarDecl &Var,
+                                               DeclSpec::TQ Qualifier,
                                                const ASTContext &Context) {
   if (locDangerous(Var.getLocation()))
     return None;
@@ -97,30 +111,31 @@ static Optional<FixItHint> changePointerItself(const VarDecl &Var,
   Optional<SourceLocation> IgnoredParens =
       skipLParensBackwards(Var.getLocation(), Context);
   if (IgnoredParens)
-    return fixIfNotDangerous(*IgnoredParens, "const ");
+    return fixIfNotDangerous(*IgnoredParens, buildQualifier(Qualifier));
   return None;
 }
 
-static Optional<FixItHint> changePointer(const VarDecl &Var,
-                                         const Type *Pointee, ConstTarget CT,
-                                         ConstPolicy CP,
-                                         const ASTContext &Context) {
-  // The pointer itself shall be marked as `const`. This is always right
+static Optional<FixItHint>
+changePointer(const VarDecl &Var, DeclSpec::TQ Qualifier, const Type *Pointee,
+              QualifierTarget QualTarget, QualifierPolicy QualPolicy,
+              const ASTContext &Context) {
+  // The pointer itself shall be marked as `const`. This is always to the right
   // of the '*' or in front of the identifier.
-  if (CT == ConstTarget::Value)
-    return changePointerItself(Var, Context);
+  if (QualTarget == QualifierTarget::Value)
+    return changePointerItself(Var, Qualifier, Context);
 
   // Mark the pointee `const` that is a normal value (`int* p = nullptr;`).
-  if (CT == ConstTarget::Pointee && isValueType(Pointee)) {
+  if (QualTarget == QualifierTarget::Pointee && isValueType(Pointee)) {
     // Adding the `const` on the left side is just the beginning of the type
     // specification. (`const int* p = nullptr;`)
-    if (CP == ConstPolicy::Left)
-      return fixIfNotDangerous(Var.getTypeSpecStartLoc(), "const ");
+    if (QualPolicy == QualifierPolicy::Left)
+      return fixIfNotDangerous(Var.getTypeSpecStartLoc(),
+                               buildQualifier(Qualifier));
 
     // Adding the `const` on the right side of the value type requires finding
     // the `*` token and placing the `const` left of it.
     // (`int const* p = nullptr;`)
-    if (CP == ConstPolicy::Right) {
+    if (QualPolicy == QualifierPolicy::Right) {
       SourceLocation BeforeStar = lexer::findPreviousTokenKind(
           Var.getLocation(), Context.getSourceManager(), Context.getLangOpts(),
           tok::star);
@@ -131,31 +146,33 @@ static Optional<FixItHint> changePointer(const VarDecl &Var,
           skipLParensBackwards(BeforeStar, Context);
 
       if (IgnoredParens)
-        return fixIfNotDangerous(*IgnoredParens, " const");
+        return fixIfNotDangerous(*IgnoredParens,
+                                 buildQualifier(Qualifier, true));
       return None;
     }
   }
 
-  if (CT == ConstTarget::Pointee && isPointerType(Pointee)) {
+  if (QualTarget == QualifierTarget::Pointee && isPointerType(Pointee)) {
     // Adding the `const` to the pointee if the pointee is a pointer
-    // is the same as 'CP == Right && isValueType(Pointee)'.
+    // is the same as 'QualPolicy == Right && isValueType(Pointee)'.
     // The `const` must be left of the last `*` token.
     // (`int * const* p = nullptr;`)
     SourceLocation BeforeStar = lexer::findPreviousTokenKind(
         Var.getLocation(), Context.getSourceManager(), Context.getLangOpts(),
         tok::star);
-    return fixIfNotDangerous(BeforeStar, " const");
+    return fixIfNotDangerous(BeforeStar, buildQualifier(Qualifier, true));
   }
 
   llvm_unreachable("All paths should have been handled");
 }
 
-static Optional<FixItHint> changeReferencee(const VarDecl &Var,
-                                            QualType Pointee, ConstTarget CT,
-                                            ConstPolicy CP,
-                                            const ASTContext &Context) {
-  if (CP == ConstPolicy::Left && isValueType(Pointee))
-    return fixIfNotDangerous(Var.getTypeSpecStartLoc(), "const ");
+static Optional<FixItHint>
+changeReferencee(const VarDecl &Var, DeclSpec::TQ Qualifier, QualType Pointee,
+                 QualifierTarget QualTarget, QualifierPolicy QualPolicy,
+                 const ASTContext &Context) {
+  if (QualPolicy == QualifierPolicy::Left && isValueType(Pointee))
+    return fixIfNotDangerous(Var.getTypeSpecStartLoc(),
+                             buildQualifier(Qualifier));
 
   SourceLocation BeforeRef = lexer::findPreviousAnyTokenKind(
       Var.getLocation(), Context.getSourceManager(), Context.getLangOpts(),
@@ -163,47 +180,53 @@ static Optional<FixItHint> changeReferencee(const VarDecl &Var,
   Optional<SourceLocation> IgnoredParens =
       skipLParensBackwards(BeforeRef, Context);
   if (IgnoredParens)
-    return fixIfNotDangerous(*IgnoredParens, " const");
+    return fixIfNotDangerous(*IgnoredParens, buildQualifier(Qualifier, true));
 
   return None;
 }
 
-Optional<FixItHint> changeVarDeclToConst(const VarDecl &Var, ConstTarget CT,
-                                         ConstPolicy CP,
-                                         const ASTContext *Context) {
-  assert((CP == ConstPolicy::Left || CP == ConstPolicy::Right) &&
+Optional<FixItHint> addQualifierToVarDecl(const VarDecl &Var,
+                                          DeclSpec::TQ Qualifier,
+                                          QualifierTarget QualTarget,
+                                          QualifierPolicy QualPolicy,
+                                          const ASTContext *Context) {
+  assert((QualPolicy == QualifierPolicy::Left ||
+          QualPolicy == QualifierPolicy::Right) &&
          "Unexpected Insertion Policy");
-  assert((CT == ConstTarget::Pointee || CT == ConstTarget::Value) &&
+  assert((QualTarget == QualifierTarget::Pointee ||
+          QualTarget == QualifierTarget::Value) &&
          "Unexpected Target");
 
   QualType ParenStrippedType = Var.getType().IgnoreParens();
   if (isValueType(ParenStrippedType))
-    return changeValue(Var, CT, CP, *Context);
+    return changeValue(Var, Qualifier, QualTarget, QualPolicy, *Context);
 
   if (isReferenceType(ParenStrippedType))
-    return changeReferencee(Var, Var.getType()->getPointeeType(), CT, CP,
-                            *Context);
+    return changeReferencee(Var, Qualifier, Var.getType()->getPointeeType(),
+                            QualTarget, QualPolicy, *Context);
 
   if (isMemberOrFunctionPointer(ParenStrippedType))
-    return changePointerItself(Var, *Context);
+    return changePointerItself(Var, Qualifier, *Context);
 
   if (isPointerType(ParenStrippedType))
-    return changePointer(Var, ParenStrippedType->getPointeeType().getTypePtr(),
-                         CT, CP, *Context);
+    return changePointer(Var, Qualifier,
+                         ParenStrippedType->getPointeeType().getTypePtr(),
+                         QualTarget, QualPolicy, *Context);
 
   if (isArrayType(ParenStrippedType)) {
     const Type *AT = ParenStrippedType->getBaseElementTypeUnsafe();
     assert(AT && "Did not retrieve array element type for an array.");
 
     if (isValueType(AT))
-      return changeValue(Var, CT, CP, *Context);
+      return changeValue(Var, Qualifier, QualTarget, QualPolicy, *Context);
 
     if (isPointerType(AT))
-      return changePointer(Var, AT->getPointeeType().getTypePtr(), CT, CP,
-                           *Context);
+      return changePointer(Var, Qualifier, AT->getPointeeType().getTypePtr(),
+                           QualTarget, QualPolicy, *Context);
   }
 
-  return None;
+  llvm_unreachable(
+      "All possible combinations should have been handled already");
 }
 } // namespace fixit
 } // namespace utils

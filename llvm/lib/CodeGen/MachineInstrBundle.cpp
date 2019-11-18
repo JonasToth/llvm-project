@@ -15,6 +15,7 @@
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Target/TargetMachine.h"
 #include <utility>
 using namespace llvm;
@@ -154,10 +155,10 @@ void llvm::finalizeBundle(MachineBasicBlock &MBB,
         continue;
       }
 
-      unsigned Reg = MO.getReg();
+      Register Reg = MO.getReg();
       if (!Reg)
         continue;
-      assert(TargetRegisterInfo::isPhysicalRegister(Reg));
+
       if (LocalDefSet.count(Reg)) {
         MO.setIsInternalRead();
         if (MO.isKill())
@@ -177,7 +178,7 @@ void llvm::finalizeBundle(MachineBasicBlock &MBB,
 
     for (unsigned i = 0, e = Defs.size(); i != e; ++i) {
       MachineOperand &MO = *Defs[i];
-      unsigned Reg = MO.getReg();
+      Register Reg = MO.getReg();
       if (!Reg)
         continue;
 
@@ -194,7 +195,7 @@ void llvm::finalizeBundle(MachineBasicBlock &MBB,
           DeadDefSet.erase(Reg);
       }
 
-      if (!MO.isDead()) {
+      if (!MO.isDead() && Register::isPhysicalRegister(Reg)) {
         for (MCSubRegIterator SubRegs(Reg, TRI); SubRegs.isValid(); ++SubRegs) {
           unsigned SubReg = *SubRegs;
           if (LocalDefSet.insert(SubReg).second)
@@ -316,7 +317,7 @@ MachineOperandIteratorBase::analyzePhysReg(unsigned Reg,
   bool AllDefsDead = true;
   PhysRegInfo PRI = {false, false, false, false, false, false, false, false};
 
-  assert(TargetRegisterInfo::isPhysicalRegister(Reg) &&
+  assert(Register::isPhysicalRegister(Reg) &&
          "analyzePhysReg not given a physical register!");
   for (; isValid(); ++*this) {
     MachineOperand &MO = deref();
@@ -329,8 +330,8 @@ MachineOperandIteratorBase::analyzePhysReg(unsigned Reg,
     if (!MO.isReg())
       continue;
 
-    unsigned MOReg = MO.getReg();
-    if (!MOReg || !TargetRegisterInfo::isPhysicalRegister(MOReg))
+    Register MOReg = MO.getReg();
+    if (!MOReg || !Register::isPhysicalRegister(MOReg))
       continue;
 
     if (!TRI->regsOverlap(MOReg, Reg))

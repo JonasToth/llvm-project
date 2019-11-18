@@ -408,8 +408,8 @@ static Stmt *create_call_once(ASTContext &C, const FunctionDecl *D) {
   // reference.
   for (unsigned int ParamIdx = 2; ParamIdx < D->getNumParams(); ParamIdx++) {
     const ParmVarDecl *PDecl = D->getParamDecl(ParamIdx);
-    if (PDecl &&
-        CallbackFunctionType->getParamType(ParamIdx - 2)
+    assert(PDecl);
+    if (CallbackFunctionType->getParamType(ParamIdx - 2)
                 .getNonReferenceType()
                 .getCanonicalType() !=
             PDecl->getType().getNonReferenceType().getCanonicalType()) {
@@ -829,6 +829,16 @@ Stmt *BodyFarm::getBody(const ObjCMethodDecl *D) {
   //
   if (D->param_size() != 0)
     return nullptr;
+
+  // If the property was defined in an extension, search the extensions for
+  // overrides.
+  const ObjCInterfaceDecl *OID = D->getClassInterface();
+  if (dyn_cast<ObjCInterfaceDecl>(D->getParent()) != OID)
+    for (auto *Ext : OID->known_extensions()) {
+      auto *OMD = Ext->getInstanceMethod(D->getSelector());
+      if (OMD && !OMD->isImplicit())
+        return nullptr;
+    }
 
   Val = createObjCPropertyGetter(C, Prop);
 

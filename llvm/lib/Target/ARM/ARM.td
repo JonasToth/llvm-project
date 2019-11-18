@@ -57,12 +57,15 @@ def FeatureD32            : SubtargetFeature<"d32", "HasD32", "true",
                                              "Extend FP to 32 double registers">;
 
 multiclass VFPver<string name, string query, string description,
-                  list<SubtargetFeature> prev = [],
-                  list<SubtargetFeature> otherimplies = []> {
+                  list<SubtargetFeature> prev,
+                  list<SubtargetFeature> otherimplies,
+                  list<SubtargetFeature> vfp2prev = []> {
   def _D16_SP: SubtargetFeature<
     name#"d16sp", query#"D16SP", "true",
     description#" with only 16 d-registers and no double precision",
-    !foreach(v, prev, !cast<SubtargetFeature>(v # "_D16_SP")) # otherimplies>;
+    !foreach(v, prev, !cast<SubtargetFeature>(v # "_D16_SP")) #
+      !foreach(v, vfp2prev, !cast<SubtargetFeature>(v # "_SP")) #
+      otherimplies>;
   def _SP: SubtargetFeature<
     name#"sp", query#"SP", "true",
     description#" with no double precision",
@@ -72,6 +75,7 @@ multiclass VFPver<string name, string query, string description,
     name#"d16", query#"D16", "true",
     description#" with only 16 d-registers",
     !foreach(v, prev, !cast<SubtargetFeature>(v # "_D16")) #
+      vfp2prev #
       otherimplies # [FeatureFP64, !cast<SubtargetFeature>(NAME # "_D16_SP")]>;
   def "": SubtargetFeature<
     name, query, "true", description,
@@ -80,11 +84,17 @@ multiclass VFPver<string name, string query, string description,
         !cast<SubtargetFeature>(NAME # "_SP")]>;
 }
 
-defm FeatureVFP2: VFPver<"vfp2", "HasVFPv2", "Enable VFP2 instructions",
-                         [], [FeatureFPRegs]>;
+def FeatureVFP2_SP        : SubtargetFeature<"vfp2sp", "HasVFPv2SP", "true",
+                                             "Enable VFP2 instructions with "
+                                             "no double precision",
+                                             [FeatureFPRegs]>;
+
+def FeatureVFP2           : SubtargetFeature<"vfp2", "HasVFPv2", "true",
+                                             "Enable VFP2 instructions",
+                                             [FeatureFP64, FeatureVFP2_SP]>;
 
 defm FeatureVFP3: VFPver<"vfp3", "HasVFPv3", "Enable VFP3 instructions",
-                         [FeatureVFP2]>;
+                         [], [], [FeatureVFP2]>;
 
 def FeatureNEON           : SubtargetFeature<"neon", "HasNEON", "true",
                                              "Enable NEON instructions",
@@ -98,7 +108,7 @@ defm FeatureVFP4: VFPver<"vfp4", "HasVFPv4", "Enable VFP4 instructions",
                          [FeatureVFP3], [FeatureFP16]>;
 
 defm FeatureFPARMv8: VFPver<"fp-armv8", "HasFPARMv8", "Enable ARMv8 FP",
-                         [FeatureVFP4]>;
+                         [FeatureVFP4], []>;
 
 def FeatureFullFP16       : SubtargetFeature<"fullfp16", "HasFullFP16", "true",
                                              "Enable full half-precision "
@@ -302,8 +312,17 @@ def FeatureVMLxForwarding : SubtargetFeature<"vmlx-forwarding",
 def FeaturePref32BitThumb : SubtargetFeature<"32bit", "Pref32BitThumb", "true",
                                              "Prefer 32-bit Thumb instrs">;
 
-def FeaturePrefLoopAlign32 : SubtargetFeature<"loop-align", "PrefLoopAlignment","2",
+def FeaturePrefLoopAlign32 : SubtargetFeature<"loop-align", "PrefLoopLogAlignment","2",
                                               "Prefer 32-bit alignment for loops">;
+
+def FeatureMVEVectorCostFactor1 : SubtargetFeature<"mve1beat", "MVEVectorCostFactor", "1",
+                        "Model MVE instructions as a 1 beat per tick architecture">;
+
+def FeatureMVEVectorCostFactor2 : SubtargetFeature<"mve2beat", "MVEVectorCostFactor", "2",
+                        "Model MVE instructions as a 2 beats per tick architecture">;
+
+def FeatureMVEVectorCostFactor4 : SubtargetFeature<"mve4beat", "MVEVectorCostFactor", "4",
+                        "Model MVE instructions as a 4 beats per tick architecture">;
 
 /// Some instructions update CPSR partially, which can add false dependency for
 /// out-of-order implementation, e.g. Cortex-A9, unless each individual bit is
@@ -372,9 +391,11 @@ def FeatureExecuteOnly    : SubtargetFeature<"execute-only",
                                              "Enable the generation of "
                                              "execute only code.">;
 
-def FeatureReserveR9      : SubtargetFeature<"reserve-r9", "ReserveR9", "true",
-                                             "Reserve R9, making it unavailable"
-                                             " as GPR">;
+foreach i = {6-11} in
+    def FeatureReserveR#i : SubtargetFeature<"reserve-r"#i,
+                                             "ReservedGPRegisters["#i#"]", "true",
+                                             "Reserve R"#i#", making it "
+                                             "unavailable as a GPR">;
 
 def FeatureNoMovt         : SubtargetFeature<"no-movt", "NoMovt", "true",
                                              "Don't use movt/movw pairs for "
@@ -395,10 +416,6 @@ def FeatureUseMISched: SubtargetFeature<"use-misched", "UseMISched", "true",
 def FeatureNoPostRASched : SubtargetFeature<"disable-postra-scheduler",
     "DisablePostRAScheduler", "true",
     "Don't schedule again after register allocation">;
-
-// Enable use of alias analysis during code generation
-def FeatureUseAA : SubtargetFeature<"use-aa", "UseAA", "true",
-                                    "Use alias analysis during codegen">;
 
 // Armv8.5-A extensions
 
@@ -565,7 +582,6 @@ def ProcExynos  : SubtargetFeature<"exynos", "ARMProcFamily", "Exynos",
                                    "Samsung Exynos processors",
                                    [FeatureZCZeroing,
                                     FeatureUseWideStrideVFP,
-                                    FeatureUseAA,
                                     FeatureSplatVFPToNeon,
                                     FeatureSlowVGETLNi32,
                                     FeatureSlowVDUP32,
@@ -1048,13 +1064,11 @@ def : ProcessorModel<"cortex-m3",   CortexM4Model,      [ARMv7m,
                                                          ProcM3,
                                                          FeaturePrefLoopAlign32,
                                                          FeatureUseMISched,
-                                                         FeatureUseAA,
                                                          FeatureHasNoBranchPredictor]>;
 
 def : ProcessorModel<"sc300",       CortexM4Model,      [ARMv7m,
                                                          ProcM3,
                                                          FeatureUseMISched,
-                                                         FeatureUseAA,
                                                          FeatureHasNoBranchPredictor]>;
 
 def : ProcessorModel<"cortex-m4", CortexM4Model,        [ARMv7em,
@@ -1062,7 +1076,6 @@ def : ProcessorModel<"cortex-m4", CortexM4Model,        [ARMv7em,
                                                          FeaturePrefLoopAlign32,
                                                          FeatureHasSlowFPVMLx,
                                                          FeatureUseMISched,
-                                                         FeatureUseAA,
                                                          FeatureHasNoBranchPredictor]>;
 
 def : ProcNoItin<"cortex-m7",                           [ARMv7em,
@@ -1077,7 +1090,6 @@ def : ProcessorModel<"cortex-m33", CortexM4Model,       [ARMv8mMainline,
                                                          FeaturePrefLoopAlign32,
                                                          FeatureHasSlowFPVMLx,
                                                          FeatureUseMISched,
-                                                         FeatureUseAA,
                                                          FeatureHasNoBranchPredictor]>;
 
 def : ProcessorModel<"cortex-m35p", CortexM4Model,      [ARMv8mMainline,
@@ -1086,7 +1098,6 @@ def : ProcessorModel<"cortex-m35p", CortexM4Model,      [ARMv8mMainline,
                                                          FeaturePrefLoopAlign32,
                                                          FeatureHasSlowFPVMLx,
                                                          FeatureUseMISched,
-                                                         FeatureUseAA,
                                                          FeatureHasNoBranchPredictor]>;
 
 
@@ -1156,6 +1167,13 @@ def : ProcNoItin<"cortex-a76ae",                        [ARMv82a, ProcA76,
                                                          FeatureFullFP16,
                                                          FeatureDotProd]>;
 
+def : ProcNoItin<"neoverse-n1",                         [ARMv82a,
+                                                         FeatureHWDivThumb,
+                                                         FeatureHWDivARM,
+                                                         FeatureCrypto,
+                                                         FeatureCRC,
+                                                         FeatureDotProd]>;
+
 def : ProcessorModel<"cyclone",     SwiftModel,         [ARMv8a, ProcSwift,
                                                          FeatureHasRetAddrStack,
                                                          FeatureNEONForFP,
@@ -1171,8 +1189,6 @@ def : ProcessorModel<"cyclone",     SwiftModel,         [ARMv8a, ProcSwift,
                                                          FeatureZCZeroing,
                                                          FeatureNoPostRASched]>;
 
-def : ProcNoItin<"exynos-m1",                           [ARMv8a, ProcExynos]>;
-def : ProcNoItin<"exynos-m2",                           [ARMv8a, ProcExynos]>;
 def : ProcNoItin<"exynos-m3",                           [ARMv8a, ProcExynos]>;
 def : ProcNoItin<"exynos-m4",                           [ARMv82a, ProcExynos,
                                                          FeatureFullFP16,
@@ -1189,8 +1205,7 @@ def : ProcNoItin<"kryo",                                [ARMv8a, ProcKryo,
 
 def : ProcessorModel<"cortex-r52", CortexR52Model,      [ARMv8r, ProcR52,
                                                          FeatureUseMISched,
-                                                         FeatureFPAO,
-                                                         FeatureUseAA]>;
+                                                         FeatureFPAO]>;
 
 //===----------------------------------------------------------------------===//
 // Register File Description

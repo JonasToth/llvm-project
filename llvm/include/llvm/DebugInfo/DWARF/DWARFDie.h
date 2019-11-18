@@ -63,7 +63,7 @@ public:
   /// Get the absolute offset into the debug info or types section.
   ///
   /// \returns the DIE offset or -1U if invalid.
-  uint32_t getOffset() const {
+  uint64_t getOffset() const {
     assert(isValid() && "must check validity prior to calling");
     return Die->getOffset();
   }
@@ -188,6 +188,7 @@ public:
   ///
   /// \returns anm optional absolute section offset value for the attribute.
   Optional<uint64_t> getRangesBaseAttribute() const;
+  Optional<uint64_t> getLocBaseAttribute() const;
 
   /// Get the DW_AT_high_pc attribute value as an address.
   ///

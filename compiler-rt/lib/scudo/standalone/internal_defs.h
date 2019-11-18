@@ -55,11 +55,11 @@
 namespace scudo {
 
 typedef unsigned long uptr;
-typedef signed long sptr;
 typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned int u32;
 typedef unsigned long long u64;
+typedef signed long sptr;
 typedef signed char s8;
 typedef signed short s16;
 typedef signed int s32;
@@ -84,12 +84,12 @@ void NORETURN reportCheckFailed(const char *File, int Line,
 
 #define CHECK_IMPL(C1, Op, C2)                                                 \
   do {                                                                         \
-    u64 V1 = (u64)(C1);                                                        \
-    u64 V2 = (u64)(C2);                                                        \
+    scudo::u64 V1 = (scudo::u64)(C1);                                          \
+    scudo::u64 V2 = (scudo::u64)(C2);                                          \
     if (UNLIKELY(!(V1 Op V2))) {                                               \
-      reportCheckFailed(__FILE__, __LINE__, "(" #C1 ") " #Op " (" #C2 ")", V1, \
-                        V2);                                                   \
-      die();                                                                   \
+      scudo::reportCheckFailed(__FILE__, __LINE__,                             \
+                               "(" #C1 ") " #Op " (" #C2 ")", V1, V2);         \
+      scudo::die();                                                            \
     }                                                                          \
   } while (false)
 
@@ -127,8 +127,6 @@ void NORETURN reportCheckFailed(const char *File, int Line,
   } while (0)
 
 #define COMPILER_CHECK(Pred) static_assert(Pred, "")
-
-enum LinkerInitialized { LINKER_INITIALIZED = 0 };
 
 } // namespace scudo
 

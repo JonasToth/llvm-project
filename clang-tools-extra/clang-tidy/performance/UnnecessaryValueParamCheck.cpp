@@ -163,14 +163,15 @@ void UnnecessaryValueParamCheck::check(const MatchFinder::MatchResult &Result) {
     // whether it is const or not as constness can differ between definition and
     // declaration.
     if (!CurrentParam.getType().getCanonicalType().isConstQualified())
-      Diag << *utils::fixit::changeVarDeclToConst(CurrentParam);
+      Diag << *utils::fixit::addQualifierToVarDecl(CurrentParam,
+                                                   DeclSpec::TQ::TQ_const);
   }
 }
 
 void UnnecessaryValueParamCheck::registerPPCallbacks(
     const SourceManager &SM, Preprocessor *PP, Preprocessor *ModuleExpanderPP) {
-  Inserter = llvm::make_unique<utils::IncludeInserter>(SM, getLangOpts(),
-                                                       IncludeStyle);
+  Inserter =
+      std::make_unique<utils::IncludeInserter>(SM, getLangOpts(), IncludeStyle);
   PP->addPPCallbacks(Inserter->CreatePPCallbacks());
 }
 

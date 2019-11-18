@@ -27,6 +27,7 @@
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/EHPersonalities.h"
+#include "llvm/Analysis/LegacyDivergenceAnalysis.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -74,6 +75,7 @@
 #include "llvm/IR/Type.h"
 #include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Pass.h"
@@ -304,23 +306,18 @@ void TargetLowering::AdjustInstrPostInstrSelection(MachineInstr &MI,
 // SelectionDAGISel code
 //===----------------------------------------------------------------------===//
 
-SelectionDAGISel::SelectionDAGISel(TargetMachine &tm,
-                                   CodeGenOpt::Level OL) :
-  MachineFunctionPass(ID), TM(tm),
-  FuncInfo(new FunctionLoweringInfo()),
-  SwiftError(new SwiftErrorValueTracking()),
-  CurDAG(new SelectionDAG(tm, OL)),
-  SDB(new SelectionDAGBuilder(*CurDAG, *FuncInfo, *SwiftError, OL)),
-  AA(), GFI(),
-  OptLevel(OL),
-  DAGSize(0) {
-    initializeGCModuleInfoPass(*PassRegistry::getPassRegistry());
-    initializeBranchProbabilityInfoWrapperPassPass(
-        *PassRegistry::getPassRegistry());
-    initializeAAResultsWrapperPassPass(*PassRegistry::getPassRegistry());
-    initializeTargetLibraryInfoWrapperPassPass(
-        *PassRegistry::getPassRegistry());
-  }
+SelectionDAGISel::SelectionDAGISel(TargetMachine &tm, CodeGenOpt::Level OL)
+    : MachineFunctionPass(ID), TM(tm), FuncInfo(new FunctionLoweringInfo()),
+      SwiftError(new SwiftErrorValueTracking()),
+      CurDAG(new SelectionDAG(tm, OL)),
+      SDB(new SelectionDAGBuilder(*CurDAG, *FuncInfo, *SwiftError, OL)), AA(),
+      GFI(), OptLevel(OL), DAGSize(0) {
+  initializeGCModuleInfoPass(*PassRegistry::getPassRegistry());
+  initializeBranchProbabilityInfoWrapperPassPass(
+      *PassRegistry::getPassRegistry());
+  initializeAAResultsWrapperPassPass(*PassRegistry::getPassRegistry());
+  initializeTargetLibraryInfoWrapperPassPass(*PassRegistry::getPassRegistry());
+}
 
 SelectionDAGISel::~SelectionDAGISel() {
   delete SDB;
@@ -434,9 +431,9 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
   TII = MF->getSubtarget().getInstrInfo();
   TLI = MF->getSubtarget().getTargetLowering();
   RegInfo = &MF->getRegInfo();
-  LibInfo = &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI();
+  LibInfo = &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI(Fn);
   GFI = Fn.hasGC() ? &getAnalysis<GCModuleInfo>().getFunctionInfo(Fn) : nullptr;
-  ORE = make_unique<OptimizationRemarkEmitter>(&Fn);
+  ORE = std::make_unique<OptimizationRemarkEmitter>(&Fn);
   auto *DTWP = getAnalysisIfAvailable<DominatorTreeWrapperPass>();
   DominatorTree *DT = DTWP ? &DTWP->getDomTree() : nullptr;
   auto *LIWP = getAnalysisIfAvailable<LoopInfoWrapperPass>();
@@ -524,8 +521,7 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
       To = J->second;
     }
     // Make sure the new register has a sufficiently constrained register class.
-    if (TargetRegisterInfo::isVirtualRegister(From) &&
-        TargetRegisterInfo::isVirtualRegister(To))
+    if (Register::isVirtualRegister(From) && Register::isVirtualRegister(To))
       MRI.constrainRegClass(To, MRI.getRegClass(From));
     // Replace it.
 
@@ -572,7 +568,7 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
     bool hasFI = MI->getOperand(0).isFI();
     Register Reg =
         hasFI ? TRI.getFrameRegister(*MF) : MI->getOperand(0).getReg();
-    if (TargetRegisterInfo::isPhysicalRegister(Reg))
+    if (Register::isPhysicalRegister(Reg))
       EntryMBB->insert(EntryMBB->begin(), MI);
     else {
       MachineInstr *Def = RegInfo->getVRegDef(Reg);
@@ -582,7 +578,7 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
         Def->getParent()->insert(std::next(InsertPos), MI);
       } else
         LLVM_DEBUG(dbgs() << "Dropping debug info for dead vreg"
-                          << TargetRegisterInfo::virtReg2Index(Reg) << "\n");
+                          << Register::virtReg2Index(Reg) << "\n");
     }
 
     // If Reg is live-in then update debug info to track its copy in a vreg.
@@ -671,8 +667,7 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
       To = J->second;
     }
     // Make sure the new register has a sufficiently constrained register class.
-    if (TargetRegisterInfo::isVirtualRegister(From) &&
-        TargetRegisterInfo::isVirtualRegister(To))
+    if (Register::isVirtualRegister(From) && Register::isVirtualRegister(To))
       MRI.constrainRegClass(To, MRI.getRegClass(From));
     // Replace it.
 
@@ -760,7 +755,7 @@ void SelectionDAGISel::ComputeLiveOutVRegInfo() {
       continue;
 
     unsigned DestReg = cast<RegisterSDNode>(N->getOperand(1))->getReg();
-    if (!TargetRegisterInfo::isVirtualRegister(DestReg))
+    if (!Register::isVirtualRegister(DestReg))
       continue;
 
     // Ignore non-integer values.
@@ -1590,7 +1585,7 @@ void SelectionDAGISel::SelectAllBasicBlocks(const Function &Fn) {
       // But if FastISel was run, we already selected some of the block.
       // If we emitted a tail-call, we need to delete any previously emitted
       // instruction that follows it.
-      if (HadTailCall && FuncInfo->InsertPt != FuncInfo->MBB->end())
+      if (FastIS && HadTailCall && FuncInfo->InsertPt != FuncInfo->MBB->end())
         FastIS->removeDeadCode(FuncInfo->InsertPt, FuncInfo->MBB->end());
     }
 
@@ -1652,9 +1647,8 @@ static bool MIIsInTerminatorSequence(const MachineInstr &MI) {
 
   // Make sure that the copy dest is not a vreg when the copy source is a
   // physical register.
-  if (!OPI2->isReg() ||
-      (!TargetRegisterInfo::isPhysicalRegister(OPI->getReg()) &&
-       TargetRegisterInfo::isPhysicalRegister(OPI2->getReg())))
+  if (!OPI2->isReg() || (!Register::isPhysicalRegister(OPI->getReg()) &&
+                         Register::isPhysicalRegister(OPI2->getReg())))
     return false;
 
   return true;
@@ -2234,9 +2228,9 @@ void SelectionDAGISel::Select_READ_REGISTER(SDNode *Op) {
   SDLoc dl(Op);
   MDNodeSDNode *MD = dyn_cast<MDNodeSDNode>(Op->getOperand(1));
   const MDString *RegStr = dyn_cast<MDString>(MD->getMD()->getOperand(0));
-  unsigned Reg =
+  Register Reg =
       TLI->getRegisterByName(RegStr->getString().data(), Op->getValueType(0),
-                             *CurDAG);
+                             CurDAG->getMachineFunction());
   SDValue New = CurDAG->getCopyFromReg(
                         Op->getOperand(0), dl, Reg, Op->getValueType(0));
   New->setNodeId(-1);
@@ -2248,9 +2242,9 @@ void SelectionDAGISel::Select_WRITE_REGISTER(SDNode *Op) {
   SDLoc dl(Op);
   MDNodeSDNode *MD = dyn_cast<MDNodeSDNode>(Op->getOperand(1));
   const MDString *RegStr = dyn_cast<MDString>(MD->getMD()->getOperand(0));
-  unsigned Reg = TLI->getRegisterByName(RegStr->getString().data(),
+  Register Reg = TLI->getRegisterByName(RegStr->getString().data(),
                                         Op->getOperand(2).getValueType(),
-                                        *CurDAG);
+                                        CurDAG->getMachineFunction());
   SDValue New = CurDAG->getCopyToReg(
                         Op->getOperand(0), dl, Reg, Op->getOperand(2));
   New->setNodeId(-1);
@@ -3323,10 +3317,13 @@ void SelectionDAGISel::SelectCodeCommon(SDNode *NodeToMatch,
       continue;
     }
 
-    case OPC_EmitCopyToReg: {
+    case OPC_EmitCopyToReg:
+    case OPC_EmitCopyToReg2: {
       unsigned RecNo = MatcherTable[MatcherIndex++];
       assert(RecNo < RecordedNodes.size() && "Invalid EmitCopyToReg");
       unsigned DestPhysReg = MatcherTable[MatcherIndex++];
+      if (Opcode == OPC_EmitCopyToReg2)
+        DestPhysReg |= MatcherTable[MatcherIndex++] << 8;
 
       if (!InputChain.getNode())
         InputChain = CurDAG->getEntryNode();

@@ -257,7 +257,7 @@ SymbolKind indexSymbolKindToSymbolKind(index::SymbolKind Kind) {
     return SymbolKind::Property;
   case index::SymbolKind::Constructor:
   case index::SymbolKind::Destructor:
-    return SymbolKind::Method;
+    return SymbolKind::Constructor;
   case index::SymbolKind::ConversionFunction:
     return SymbolKind::Function;
   case index::SymbolKind::Parameter:
@@ -330,6 +330,10 @@ bool fromJSON(const llvm::json::Value &Params, ClientCapabilities &R) {
             R.OffsetsInSignatureHelp = *OffsetSupport;
         }
       }
+    }
+    if (auto *Rename = TextDocument->getObject("rename")) {
+      if (auto RenameSupport = Rename->getBoolean("prepareSupport"))
+        R.RenamePrepareSupport = *RenameSupport;
     }
   }
   if (auto *Workspace = O->getObject("workspace")) {
@@ -664,6 +668,15 @@ llvm::json::Value toJSON(const TweakArgs &A) {
 
 llvm::json::Value toJSON(const ApplyWorkspaceEditParams &Params) {
   return llvm::json::Object{{"edit", Params.edit}};
+}
+
+bool fromJSON(const llvm::json::Value &Response,
+              ApplyWorkspaceEditResponse &R) {
+  llvm::json::ObjectMapper O(Response);
+  if (!O || !O.map("applied", R.applied))
+    return false;
+  O.map("failureReason", R.failureReason);
+  return true;
 }
 
 bool fromJSON(const llvm::json::Value &Params, TextDocumentPositionParams &R) {
@@ -1060,5 +1073,18 @@ llvm::json::Value toJSON(const SemanticHighlightingParams &Highlighting) {
   };
 }
 
+bool fromJSON(const llvm::json::Value &Params, SelectionRangeParams &P) {
+  llvm::json::ObjectMapper O(Params);
+  return O && O.map("textDocument", P.textDocument) &&
+         O.map("positions", P.positions);
+}
+
+llvm::json::Value toJSON(const SelectionRange &Out) {
+  if (Out.parent) {
+    return llvm::json::Object{{"range", Out.range},
+                              {"parent", toJSON(*Out.parent)}};
+  }
+  return llvm::json::Object{{"range", Out.range}};
+}
 } // namespace clangd
 } // namespace clang

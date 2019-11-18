@@ -16,6 +16,7 @@
 #include "../readability/MagicNumbersCheck.h"
 #include "AvoidGotoCheck.h"
 #include "ConstCorrectnessCheck.h"
+#include "InitVariablesCheck.h"
 #include "InterfacesGlobalInitCheck.h"
 #include "MacroUsageCheck.h"
 #include "NarrowingConversionsCheck.h"
@@ -52,6 +53,8 @@ public:
         "cppcoreguidelines-const-correctness");
     CheckFactories.registerCheck<modernize::UseOverrideCheck>(
         "cppcoreguidelines-explicit-virtual-functions");
+    CheckFactories.registerCheck<InitVariablesCheck>(
+        "cppcoreguidelines-init-variables");
     CheckFactories.registerCheck<InterfacesGlobalInitCheck>(
         "cppcoreguidelines-interfaces-global-init");
     CheckFactories.registerCheck<MacroUsageCheck>(

@@ -7,8 +7,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "Annotations.h"
-#include "ClangdUnit.h"
 #include "Diagnostics.h"
+#include "ParsedAST.h"
 #include "Path.h"
 #include "Protocol.h"
 #include "SourceCode.h"
@@ -721,7 +721,10 @@ $insert[[]]namespace ns {
 }
 void g() {  ns::$[[scope]]::X_Y();  }
   )cpp");
-  auto TU = TestTU::withCode(Test.code());
+  TestTU TU;
+  TU.Code = Test.code();
+  // FIXME: Figure out why this is needed and remove it, PR43662.
+  TU.ExtraArgs.push_back("-fno-ms-compatibility");
   auto Index = buildIndexWithSymbol(
       SymbolWithHeader{"ns::scope::X_Y", "unittest:///x.h", "\"x.h\""});
   TU.ExternalIndex = Index.get();
@@ -744,7 +747,10 @@ void f() {
 }
 }
   )cpp");
-  auto TU = TestTU::withCode(Test.code());
+  TestTU TU;
+  TU.Code = Test.code();
+  // FIXME: Figure out why this is needed and remove it, PR43662.
+  TU.ExtraArgs.push_back("-fno-ms-compatibility");
   auto Index = buildIndexWithSymbol(
       {SymbolWithHeader{"clang::clangd::X", "unittest:///x.h", "\"x.h\""},
        SymbolWithHeader{"clang::clangd::ns::Y", "unittest:///y.h", "\"y.h\""}});
@@ -795,6 +801,27 @@ namespace c {
                   Diag(Test.range(), "no type named 'X' in namespace 'a'"),
                   WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
                               "Add include \"x.h\" for symbol a::X")))));
+}
+
+TEST(IncludeFixerTest, NoCrashOnTemplateInstantiations) {
+  Annotations Test(R"cpp(
+    template <typename T> struct Templ {
+      template <typename U>
+      typename U::type operator=(const U &);
+    };
+
+    struct A {
+      Templ<char> s;
+      A() { [[a]]; } // this caused crashes if we compute scopes lazily.
+    };
+  )cpp");
+
+  auto TU = TestTU::withCode(Test.code());
+  auto Index = buildIndexWithSymbol({});
+  TU.ExternalIndex = Index.get();
+
+  EXPECT_THAT(TU.build().getDiagnostics(),
+              ElementsAre(Diag(Test.range(), "use of undeclared identifier 'a'")));
 }
 
 TEST(DiagsInHeaders, DiagInsideHeader) {
@@ -907,12 +934,33 @@ TEST(DiagsInHeaders, OnlyErrorOrFatal) {
     int x = 5/0;)cpp");
   TestTU TU = TestTU::withCode(Main.code());
   TU.AdditionalFiles = {{"a.h", Header.code()}};
-  auto diags = TU.build().getDiagnostics();
   EXPECT_THAT(TU.build().getDiagnostics(),
               UnorderedElementsAre(AllOf(
                   Diag(Main.range(), "in included file: C++ requires "
                                      "a type specifier for all declarations"),
                   WithNote(Diag(Header.range(), "error occurred here")))));
+}
+
+TEST(IgnoreDiags, FromNonWrittenSources) {
+  Annotations Main(R"cpp(
+    #include [["a.h"]]
+    void foo() {})cpp");
+  Annotations Header(R"cpp(
+    int x = 5/0;
+    int b = [[FOO]];)cpp");
+  TestTU TU = TestTU::withCode(Main.code());
+  TU.AdditionalFiles = {{"a.h", Header.code()}};
+  TU.ExtraArgs = {"-DFOO=NOOO"};
+  EXPECT_THAT(TU.build().getDiagnostics(), UnorderedElementsAre());
+}
+
+TEST(IgnoreDiags, FromNonWrittenInclude) {
+  TestTU TU = TestTU::withCode("");
+  TU.ExtraArgs.push_back("--include=a.h");
+  TU.AdditionalFiles = {{"a.h", "void main();"}};
+  // The diagnostic "main must return int" is from the header, we don't attempt
+  // to render it in the main file as there is no written location there.
+  EXPECT_THAT(TU.build().getDiagnostics(), UnorderedElementsAre());
 }
 
 } // namespace

@@ -12,8 +12,7 @@ namespace {
 using namespace clang::ast_matchers;
 using namespace utils::fixit;
 
-template <ConstTarget CT = ConstTarget::Pointee,
-          ConstPolicy CP = ConstPolicy::Left>
+template <QualifierTarget CT, QualifierPolicy CP>
 class ConstTransform : public ClangTidyCheck {
 public:
   ConstTransform(StringRef CheckName, ClangTidyContext *Context)
@@ -25,8 +24,9 @@ public:
 
   void check(const MatchFinder::MatchResult &Result) override {
     const auto *D = Result.Nodes.getNodeAs<VarDecl>("var");
-    using utils::fixit::changeVarDeclToConst;
-    Optional<FixItHint> Fix = changeVarDeclToConst(*D, CT, CP, Result.Context);
+    using utils::fixit::addQualifierToVarDecl;
+    Optional<FixItHint> Fix = addQualifierToVarDecl(*D, DeclSpec::TQ::TQ_const,
+                                                    CT, CP, Result.Context);
     auto Diag = diag(D->getBeginLoc(), "doing const transformation");
     if (Fix)
       Diag << *Fix;
@@ -36,18 +36,18 @@ public:
 
 namespace test {
 using PointeeLTransform =
-    ConstTransform<ConstTarget::Pointee, ConstPolicy::Left>;
+    ConstTransform<QualifierTarget::Pointee, QualifierPolicy::Left>;
 using PointeeRTransform =
-    ConstTransform<ConstTarget::Pointee, ConstPolicy::Right>;
+    ConstTransform<QualifierTarget::Pointee, QualifierPolicy::Right>;
 
-using ValueLTransform = ConstTransform<ConstTarget::Value, ConstPolicy::Left>;
-using ValueRTransform = ConstTransform<ConstTarget::Value, ConstPolicy::Right>;
+using ValueLTransform =
+    ConstTransform<QualifierTarget::Value, QualifierPolicy::Left>;
+using ValueRTransform =
+    ConstTransform<QualifierTarget::Value, QualifierPolicy::Right>;
 
 // ----------------------------------------------------------------------------
 // Test Value-like types. Everything with indirection is done later.
 // ----------------------------------------------------------------------------
-
-// TODO: Template-code
 
 TEST(Values, Builtin) {
   StringRef Snippet = "int target = 0;";
@@ -77,6 +77,36 @@ TEST(Values, TypedefBuiltin) {
 }
 TEST(Values, TypedefBuiltinPointer) {
   StringRef T = "typedef int* MyInt;";
+  StringRef S = "MyInt target = nullptr;";
+  auto Cat = [&T](StringRef S) { return (T + S).str(); };
+
+  EXPECT_EQ(Cat("const MyInt target = nullptr;"),
+            runCheckOnCode<ValueLTransform>(Cat(S)));
+  EXPECT_EQ(Cat("const MyInt target = nullptr;"),
+            runCheckOnCode<PointeeLTransform>(Cat(S)));
+
+  EXPECT_EQ(Cat("MyInt const target = nullptr;"),
+            runCheckOnCode<ValueRTransform>(Cat(S)));
+  EXPECT_EQ(Cat("MyInt const target = nullptr;"),
+            runCheckOnCode<PointeeRTransform>(Cat(S)));
+}
+TEST(Values, UsingBuiltin) {
+  StringRef T = "using MyInt = int;";
+  StringRef S = "MyInt target = 0;";
+  auto Cat = [&T](StringRef S) { return (T + S).str(); };
+
+  EXPECT_EQ(Cat("const MyInt target = 0;"),
+            runCheckOnCode<ValueLTransform>(Cat(S)));
+  EXPECT_EQ(Cat("const MyInt target = 0;"),
+            runCheckOnCode<PointeeLTransform>(Cat(S)));
+
+  EXPECT_EQ(Cat("MyInt const target = 0;"),
+            runCheckOnCode<ValueRTransform>(Cat(S)));
+  EXPECT_EQ(Cat("MyInt const target = 0;"),
+            runCheckOnCode<PointeeRTransform>(Cat(S)));
+}
+TEST(Values, UsingBuiltinPointer) {
+  StringRef T = "using MyInt = int*;";
   StringRef S = "MyInt target = nullptr;";
   auto Cat = [&T](StringRef S) { return (T + S).str(); };
 
@@ -728,6 +758,19 @@ TEST(Macro, MacroTypeReference) {
 // Test template code.
 // ----------------------------------------------------------------------------
 
+TEST(Template, TemplateVariable) {
+  StringRef T = "template <typename T> T target = 3.1415;";
+
+  EXPECT_EQ("template <typename T> const T target = 3.1415;",
+            runCheckOnCode<ValueLTransform>(T));
+  EXPECT_EQ("template <typename T> T const target = 3.1415;",
+            runCheckOnCode<ValueRTransform>(T));
+
+  EXPECT_EQ("template <typename T> const T target = 3.1415;",
+            runCheckOnCode<PointeeLTransform>(T));
+  EXPECT_EQ("template <typename T> T const target = 3.1415;",
+            runCheckOnCode<PointeeRTransform>(T));
+}
 TEST(Template, FunctionValue) {
   StringRef T = "template <typename T> void f(T v) \n";
   StringRef S = "{ T target = v; }";
@@ -852,6 +895,88 @@ TEST(Template, StructReference) {
   EXPECT_EQ(Cat("{ T const& target = v; }"),
             runCheckOnCode<PointeeRTransform>(Cat(S)));
 }
+TEST(Template, DependentReturnFunction) {
+  StringRef TS = "template <typename T> struct TS { using value_type = T; };";
+  StringRef T = "template <typename T> void foo() ";
+  StringRef S = "{ typename T::value_type target; }";
+  auto Cat = [&TS, &T](StringRef S) { return (TS + T + S).str(); };
+
+  EXPECT_EQ(Cat("{ const typename T::value_type target; }"),
+            runCheckOnCode<ValueLTransform>(Cat(S)));
+  EXPECT_EQ(Cat("{ typename T::value_type const target; }"),
+            runCheckOnCode<ValueRTransform>(Cat(S)));
+
+  EXPECT_EQ(Cat("{ const typename T::value_type target; }"),
+            runCheckOnCode<PointeeLTransform>(Cat(S)));
+  EXPECT_EQ(Cat("{ typename T::value_type const target; }"),
+            runCheckOnCode<PointeeRTransform>(Cat(S)));
+}
+TEST(Template, DependentReturnPointerFunction) {
+  StringRef TS = "template <typename T> struct TS { using value_type = T; };";
+  StringRef T = "template <typename T> void foo() ";
+  StringRef S = "{ typename T::value_type *target; }";
+  auto Cat = [&TS, &T](StringRef S) { return (TS + T + S).str(); };
+
+  EXPECT_EQ(Cat("{ typename T::value_type *const target; }"),
+            runCheckOnCode<ValueLTransform>(Cat(S)));
+  EXPECT_EQ(Cat("{ typename T::value_type *const target; }"),
+            runCheckOnCode<ValueRTransform>(Cat(S)));
+
+  EXPECT_EQ(Cat("{ const typename T::value_type *target; }"),
+            runCheckOnCode<PointeeLTransform>(Cat(S)));
+  EXPECT_EQ(Cat("{ typename T::value_type  const*target; }"),
+            runCheckOnCode<PointeeRTransform>(Cat(S)));
+}
+TEST(Template, DependentReturnReferenceFunction) {
+  StringRef TS = "template <typename T> struct TS { using value_type = T; };";
+  StringRef T = "template <typename T> void foo(T& f) ";
+  StringRef S = "{ typename T::value_type &target = f; }";
+  auto Cat = [&TS, &T](StringRef S) { return (TS + T + S).str(); };
+
+  EXPECT_EQ(Cat("{ const typename T::value_type &target = f; }"),
+            runCheckOnCode<ValueLTransform>(Cat(S)));
+  EXPECT_EQ(Cat("{ typename T::value_type  const&target = f; }"),
+            runCheckOnCode<ValueRTransform>(Cat(S)));
+
+  EXPECT_EQ(Cat("{ const typename T::value_type &target = f; }"),
+            runCheckOnCode<PointeeLTransform>(Cat(S)));
+  EXPECT_EQ(Cat("{ typename T::value_type  const&target = f; }"),
+            runCheckOnCode<PointeeRTransform>(Cat(S)));
+}
+TEST(Template, VectorLikeType) {
+  StringRef TS = "template <typename T> struct TS { TS(const T&) {} }; ";
+  StringRef T = "void foo() ";
+  StringRef S = "{ TS<int> target(42); }";
+  auto Cat = [&TS, &T](StringRef S) { return (TS + T + S).str(); };
+
+  EXPECT_EQ(Cat("{ const TS<int> target(42); }"),
+            runCheckOnCode<ValueLTransform>(Cat(S)));
+  EXPECT_EQ(Cat("{ TS<int> const target(42); }"),
+            runCheckOnCode<ValueRTransform>(Cat(S)));
+
+  EXPECT_EQ(Cat("{ const TS<int> target(42); }"),
+            runCheckOnCode<PointeeLTransform>(Cat(S)));
+  EXPECT_EQ(Cat("{ TS<int> const target(42); }"),
+            runCheckOnCode<PointeeRTransform>(Cat(S)));
+}
+TEST(Template, SpecializedTemplate) {
+  StringRef TS = "template <typename T = int> struct TS { TS(const T&) {} }; ";
+  StringRef TS2 = "template <> struct TS<double> { TS(const double&) {} }; ";
+  StringRef T = "void foo() ";
+  StringRef S = "{ TS<double> target(42.42); }";
+  auto Cat = [&](StringRef S) { return (TS + TS2 + T + S).str(); };
+
+  EXPECT_EQ(Cat("{ const TS<double> target(42.42); }"),
+            runCheckOnCode<ValueLTransform>(Cat(S)));
+  EXPECT_EQ(Cat("{ TS<double> const target(42.42); }"),
+            runCheckOnCode<ValueRTransform>(Cat(S)));
+
+  EXPECT_EQ(Cat("{ const TS<double> target(42.42); }"),
+            runCheckOnCode<PointeeLTransform>(Cat(S)));
+  EXPECT_EQ(Cat("{ TS<double> const target(42.42); }"),
+            runCheckOnCode<PointeeRTransform>(Cat(S)));
+}
+
 } // namespace test
 } // namespace tidy
 } // namespace clang

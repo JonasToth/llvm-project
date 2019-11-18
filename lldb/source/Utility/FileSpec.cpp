@@ -72,8 +72,8 @@ FileSpec::FileSpec(llvm::StringRef path, Style style) : m_style(style) {
   SetFile(path, style);
 }
 
-FileSpec::FileSpec(llvm::StringRef path, const llvm::Triple &Triple)
-    : FileSpec{path, Triple.isOSWindows() ? Style::windows : Style::posix} {}
+FileSpec::FileSpec(llvm::StringRef path, const llvm::Triple &triple)
+    : FileSpec{path, triple.isOSWindows() ? Style::windows : Style::posix} {}
 
 // Copy constructor
 FileSpec::FileSpec(const FileSpec *rhs) : m_directory(), m_filename() {
@@ -174,16 +174,6 @@ bool needsNormalization(const llvm::StringRef &path) {
 
 
 }
-// Assignment operator.
-const FileSpec &FileSpec::operator=(const FileSpec &rhs) {
-  if (this != &rhs) {
-    m_directory = rhs.m_directory;
-    m_filename = rhs.m_filename;
-    m_is_resolved = rhs.m_is_resolved;
-    m_style = rhs.m_style;
-  }
-  return *this;
-}
 
 void FileSpec::SetFile(llvm::StringRef pathname) { SetFile(pathname, m_style); }
 
@@ -228,8 +218,8 @@ void FileSpec::SetFile(llvm::StringRef pathname, Style style) {
     m_directory.SetString(directory);
 }
 
-void FileSpec::SetFile(llvm::StringRef path, const llvm::Triple &Triple) {
-  return SetFile(path, Triple.isOSWindows() ? Style::windows : Style::posix);
+void FileSpec::SetFile(llvm::StringRef path, const llvm::Triple &triple) {
+  return SetFile(path, triple.isOSWindows() ? Style::windows : Style::posix);
 }
 
 // Convert to pointer operator. This allows code to check any FileSpec objects

@@ -145,7 +145,7 @@ private:
                            + mb.getBufferIdentifier() + ")").str();
 
     if (_logLoading)
-      llvm::errs() << memberPath << "\n";
+      lld::errs() << memberPath << "\n";
 
     std::unique_ptr<MemoryBuffer> memberMB(MemoryBuffer::getMemBuffer(
         mb.getBuffer(), mb.getBufferIdentifier(), false));
@@ -210,7 +210,7 @@ public:
                                           const Registry &reg) const override {
     StringRef path = mb->getBufferIdentifier();
     std::unique_ptr<File> ret =
-        llvm::make_unique<FileArchive>(std::move(mb), reg, path, _logLoading);
+        std::make_unique<FileArchive>(std::move(mb), reg, path, _logLoading);
     return std::move(ret);
   }
 
