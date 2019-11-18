@@ -107,30 +107,32 @@ void ConstCorrectnessCheck::check(const MatchFinder::MatchResult &Result) {
   using namespace utils::fixit;
   using llvm::Optional;
   if (VC == VariableCategory::Value && TransformValues) {
-    if (Optional<FixItHint> Fix = changeVarDeclToConst(
-            *Variable, ConstTarget::Value, ConstPolicy::Right, Result.Context))
+    if (Optional<FixItHint> Fix = addQualifierToVarDecl(
+            *Variable, DeclSpec::TQ_const, QualifierTarget::Value,
+            QualifierPolicy::Right, Result.Context))
       Diag << *Fix;
     return;
   }
 
   if (VC == VariableCategory::Reference && TransformReferences) {
-    if (Optional<FixItHint> Fix = changeVarDeclToConst(
-            *Variable, ConstTarget::Value, ConstPolicy::Right, Result.Context))
+    if (Optional<FixItHint> Fix = addQualifierToVarDecl(
+            *Variable, DeclSpec::TQ_const, QualifierTarget::Value,
+            QualifierPolicy::Right, Result.Context))
       Diag << *Fix;
     return;
   }
 
   if (VC == VariableCategory::Pointer) {
     if (WarnPointersAsValues && TransformPointersAsValues) {
-      if (Optional<FixItHint> Fix =
-              changeVarDeclToConst(*Variable, ConstTarget::Value,
-                                   ConstPolicy::Right, Result.Context))
+      if (Optional<FixItHint> Fix = addQualifierToVarDecl(
+              *Variable, DeclSpec::TQ_const, QualifierTarget::Value,
+              QualifierPolicy::Right, Result.Context))
         Diag << *Fix;
     }
     if (TransformPointees) {
-      if (Optional<FixItHint> Fix =
-              changeVarDeclToConst(*Variable, ConstTarget::Pointee,
-                                   ConstPolicy::Right, Result.Context))
+      if (Optional<FixItHint> Fix = addQualifierToVarDecl(
+              *Variable, DeclSpec::TQ_const, QualifierTarget::Pointee,
+              QualifierPolicy::Right, Result.Context))
         Diag << *Fix;
     }
     return;
