@@ -102,6 +102,11 @@ Improvements to clang-tidy
 - New :doc:`cppcoreguidelines-init-variables
   <clang-tidy/checks/cppcoreguidelines-init-variables>` check.
 
+- New :doc:`cppcoreguidelines-const-correctness
+  <clang-tidy/checks/cppcoreguidelines-const-correctness>` check.
+
+  Suggest adding ``const`` to unmodified local variables.
+
 - New :doc:`darwin-dispatch-once-nonstatic
   <clang-tidy/checks/darwin-dispatch-once-nonstatic>` check.
 
