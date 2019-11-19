@@ -21,6 +21,11 @@ namespace {
 // FIXME: This matcher exists in some other code-review as well.
 // It should probably move to ASTMatchers.
 AST_MATCHER(VarDecl, isLocal) { return Node.isLocalVarDecl(); }
+AST_MATCHER_P(DeclStmt, containsDeclaration2,
+              ast_matchers::internal::Matcher<Decl>, InnerMatcher) {
+  return ast_matchers::internal::matchesFirstInPointerRange(
+      InnerMatcher, Node.decl_begin(), Node.decl_end(), Finder, Builder);
+}
 AST_MATCHER(ReferenceType, isSpelledAsLValue) {
   return Node.isSpelledAsLValue();
 }
@@ -55,9 +60,12 @@ void ConstCorrectnessCheck::registerMatchers(MatchFinder *Finder) {
 
   // Match the function scope for which the analysis of all local variables
   // shall be run.
-  const auto FunctionScope =
-      functionDecl(allOf(hasBody(compoundStmt().bind("scope")),
-                         findAll(LocalValDecl.bind("new-local-value"))));
+  const auto FunctionScope = functionDecl(hasBody(
+      compoundStmt(findAll(declStmt(containsDeclaration2(
+                                        LocalValDecl.bind("new-local-value")))
+                               .bind("decl-stmt")))
+          .bind("scope")));
+
   Finder->addMatcher(FunctionScope, this);
 }
 

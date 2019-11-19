@@ -225,6 +225,7 @@ Optional<FixItHint> addQualifierToVarDecl(const VarDecl &Var,
                            QualTarget, QualPolicy, *Context);
   }
 
+  return {};
   llvm_unreachable(
       "All possible combinations should have been handled already");
 }
