@@ -9,6 +9,7 @@
 #include "FixItHintUtils.h"
 #include "LexerUtils.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/Type.h"
 
 namespace clang {
 namespace tidy {
@@ -28,7 +29,7 @@ FixItHint changeVarDeclToReference(const VarDecl &Var, ASTContext &Context) {
 
 static bool isValueType(const Type *T) {
   return !(isa<PointerType>(T) || isa<ReferenceType>(T) || isa<ArrayType>(T) ||
-           isa<MemberPointerType>(T));
+           isa<MemberPointerType>(T) || isa<ObjCObjectPointerType>(T));
 }
 static bool isValueType(QualType QT) { return isValueType(QT.getTypePtr()); }
 static bool isArrayType(QualType QT) { return isa<ArrayType>(QT.getTypePtr()); }
@@ -79,7 +80,7 @@ static std::string buildQualifier(DeclSpec::TQ Qualifier,
                                   bool WhitespaceBefore = false) {
   if (WhitespaceBefore)
     return (llvm::Twine(' ') + DeclSpec::getSpecifierName(Qualifier)).str();
-  return (llvm::Twine(DeclSpec::getSpecifierName(Qualifier)) + llvm::Twine(' '))
+  return (llvm::Twine(DeclSpec::getSpecifierName(Qualifier)) + " ")
       .str();
 }
 
@@ -163,7 +164,7 @@ changePointer(const VarDecl &Var, DeclSpec::TQ Qualifier, const Type *Pointee,
     return fixIfNotDangerous(BeforeStar, buildQualifier(Qualifier, true));
   }
 
-  llvm_unreachable("All paths should have been handled");
+  return None;
 }
 
 static Optional<FixItHint>
@@ -186,10 +187,10 @@ changeReferencee(const VarDecl &Var, DeclSpec::TQ Qualifier, QualType Pointee,
 }
 
 Optional<FixItHint> addQualifierToVarDecl(const VarDecl &Var,
+                                          const ASTContext &Context,
                                           DeclSpec::TQ Qualifier,
                                           QualifierTarget QualTarget,
-                                          QualifierPolicy QualPolicy,
-                                          const ASTContext *Context) {
+                                          QualifierPolicy QualPolicy) {
   assert((QualPolicy == QualifierPolicy::Left ||
           QualPolicy == QualifierPolicy::Right) &&
          "Unexpected Insertion Policy");
@@ -199,34 +200,33 @@ Optional<FixItHint> addQualifierToVarDecl(const VarDecl &Var,
 
   QualType ParenStrippedType = Var.getType().IgnoreParens();
   if (isValueType(ParenStrippedType))
-    return changeValue(Var, Qualifier, QualTarget, QualPolicy, *Context);
+    return changeValue(Var, Qualifier, QualTarget, QualPolicy, Context);
 
   if (isReferenceType(ParenStrippedType))
     return changeReferencee(Var, Qualifier, Var.getType()->getPointeeType(),
-                            QualTarget, QualPolicy, *Context);
+                            QualTarget, QualPolicy, Context);
 
   if (isMemberOrFunctionPointer(ParenStrippedType))
-    return changePointerItself(Var, Qualifier, *Context);
+    return changePointerItself(Var, Qualifier, Context);
 
   if (isPointerType(ParenStrippedType))
     return changePointer(Var, Qualifier,
                          ParenStrippedType->getPointeeType().getTypePtr(),
-                         QualTarget, QualPolicy, *Context);
+                         QualTarget, QualPolicy, Context);
 
   if (isArrayType(ParenStrippedType)) {
     const Type *AT = ParenStrippedType->getBaseElementTypeUnsafe();
     assert(AT && "Did not retrieve array element type for an array.");
 
     if (isValueType(AT))
-      return changeValue(Var, Qualifier, QualTarget, QualPolicy, *Context);
+      return changeValue(Var, Qualifier, QualTarget, QualPolicy, Context);
 
     if (isPointerType(AT))
       return changePointer(Var, Qualifier, AT->getPointeeType().getTypePtr(),
-                           QualTarget, QualPolicy, *Context);
+                           QualTarget, QualPolicy, Context);
   }
 
-  llvm_unreachable(
-      "All possible combinations should have been handled already");
+  return None;
 }
 } // namespace fixit
 } // namespace utils

@@ -24,35 +24,31 @@ FixItHint changeVarDeclToReference(const VarDecl &Var, ASTContext &Context);
 /// Creates fix to make ``VarDecl`` const qualified.
 FixItHint changeVarDeclToConst(const VarDecl &Var);
 
-/// This enum defines where the 'const' shall be preferably added.
+/// This enum defines where the qualifier shall be preferably added.
 enum class QualifierPolicy {
-  Left,  // Add the `const` always to the left side, if that is possible.
-  Right, // Add the `const` always to the right side.
+  Left,  // Add the qualifier always to the left side, if that is possible.
+  Right, // Add the qualifier always to the right side.
 };
 
-/// This enum defines which entity is the target for adding the 'const'. This
+/// This enum defines which entity is the target for adding the qualifier. This
 /// makes only a difference for pointer-types. Other types behave identical
 /// for either value of \c ConstTarget.
 enum class QualifierTarget {
-  Pointee, /// Transforming a pointer goes for the pointee and not the pointer
-           /// itself. For references and normal values this option has no
-           /// effect.
-           /// `int * p = &i;` -> `const int * p = &i` or `int const * p = &i`.
+  Pointee, /// Transforming a pointer attaches for the pointee and not the
+           /// pointer itself. For references and normal values this option has
+           /// no effect. `int * p = &i;` -> `const int * p = &i` or `int const
+           /// * p = &i`.
   Value,   /// Transforming pointers will consider the pointer itself.
            /// `int * p = &i;` -> `int * const = &i`
 };
 
-/// \brief Creates fix to make ``VarDecl`` const qualified. Only valid if
-/// `Var` is isolated in written code. `int foo = 42;`
-///
-/// If the 'FixItHint' would be applied inside a macro or at an invalid
-/// \c SourceLocation it is not returned.
+/// \brief Creates fix to qualify ``VarDecl`` with the specified \c Qualifier.
+/// Requires that `Var` is isolated in written code like in `int foo = 42;`.
 Optional<FixItHint>
-addQualifierToVarDecl(const VarDecl &Var, DeclSpec::TQ Qualifier,
+addQualifierToVarDecl(const VarDecl &Var, const ASTContext &Context,
+                      DeclSpec::TQ Qualifier,
                       QualifierTarget CT = QualifierTarget::Pointee,
-                      QualifierPolicy CP = QualifierPolicy::Left,
-                      const ASTContext *Context = nullptr);
-
+                      QualifierPolicy CP = QualifierPolicy::Left);
 } // namespace fixit
 } // namespace utils
 } // namespace tidy
