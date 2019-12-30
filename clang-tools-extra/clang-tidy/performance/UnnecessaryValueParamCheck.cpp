@@ -162,9 +162,11 @@ void UnnecessaryValueParamCheck::check(const MatchFinder::MatchResult &Result) {
     // The parameter of each declaration needs to be checked individually as to
     // whether it is const or not as constness can differ between definition and
     // declaration.
-    if (!CurrentParam.getType().getCanonicalType().isConstQualified())
-      Diag << *utils::fixit::addQualifierToVarDecl(CurrentParam,
-                                                   DeclSpec::TQ::TQ_const);
+    if (!CurrentParam.getType().getCanonicalType().isConstQualified()) {
+      if (llvm::Optional<FixItHint> Fix = utils::fixit::addQualifierToVarDecl(
+              CurrentParam, *Result.Context, DeclSpec::TQ::TQ_const))
+        Diag << *Fix;
+    }
   }
 }
 
