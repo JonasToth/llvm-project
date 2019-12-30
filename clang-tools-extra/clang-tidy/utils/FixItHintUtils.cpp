@@ -36,12 +36,8 @@ static bool isArrayType(QualType QT) { return isa<ArrayType>(QT.getTypePtr()); }
 static bool isReferenceType(QualType QT) {
   return isa<ReferenceType>(QT.getTypePtr());
 }
-static bool isPointerType(const Type *T) { return isa<PointerType>(T); }
-static bool isPointerType(QualType QT) {
-  return isPointerType(QT.getTypePtr());
-}
 static bool isMemberOrFunctionPointer(QualType QT) {
-  return (isPointerType(QT) && QT->isFunctionPointerType()) ||
+  return (QT->isPointerType() && QT->isFunctionPointerType()) ||
          isa<MemberPointerType>(QT.getTypePtr());
 }
 static bool locDangerous(SourceLocation S) {
@@ -153,7 +149,7 @@ changePointer(const VarDecl &Var, DeclSpec::TQ Qualifier, const Type *Pointee,
     }
   }
 
-  if (QualTarget == QualifierTarget::Pointee && isPointerType(Pointee)) {
+  if (QualTarget == QualifierTarget::Pointee && Pointee->isPointerType()) {
     // Adding the `const` to the pointee if the pointee is a pointer
     // is the same as 'QualPolicy == Right && isValueType(Pointee)'.
     // The `const` must be left of the last `*` token.
@@ -209,7 +205,7 @@ Optional<FixItHint> addQualifierToVarDecl(const VarDecl &Var,
   if (isMemberOrFunctionPointer(ParenStrippedType))
     return changePointerItself(Var, Qualifier, Context);
 
-  if (isPointerType(ParenStrippedType))
+  if (ParenStrippedType->isPointerType())
     return changePointer(Var, Qualifier,
                          ParenStrippedType->getPointeeType().getTypePtr(),
                          QualTarget, QualPolicy, Context);
@@ -221,7 +217,7 @@ Optional<FixItHint> addQualifierToVarDecl(const VarDecl &Var,
     if (isValueType(AT))
       return changeValue(Var, Qualifier, QualTarget, QualPolicy, Context);
 
-    if (isPointerType(AT))
+    if (AT->isPointerType())
       return changePointer(Var, Qualifier, AT->getPointeeType().getTypePtr(),
                            QualTarget, QualPolicy, Context);
   }
