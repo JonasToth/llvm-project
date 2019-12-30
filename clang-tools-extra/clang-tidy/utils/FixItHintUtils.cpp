@@ -32,14 +32,11 @@ static bool isValueType(const Type *T) {
            isa<MemberPointerType>(T) || isa<ObjCObjectPointerType>(T));
 }
 static bool isValueType(QualType QT) { return isValueType(QT.getTypePtr()); }
-static bool isArrayType(QualType QT) { return isa<ArrayType>(QT.getTypePtr()); }
-static bool isReferenceType(QualType QT) {
-  return isa<ReferenceType>(QT.getTypePtr());
-}
 static bool isMemberOrFunctionPointer(QualType QT) {
   return (QT->isPointerType() && QT->isFunctionPointerType()) ||
          isa<MemberPointerType>(QT.getTypePtr());
 }
+
 static bool locDangerous(SourceLocation S) {
   return S.isInvalid() || S.isMacroID();
 }
@@ -198,7 +195,7 @@ Optional<FixItHint> addQualifierToVarDecl(const VarDecl &Var,
   if (isValueType(ParenStrippedType))
     return changeValue(Var, Qualifier, QualTarget, QualPolicy, Context);
 
-  if (isReferenceType(ParenStrippedType))
+  if (ParenStrippedType->isReferenceType())
     return changeReferencee(Var, Qualifier, Var.getType()->getPointeeType(),
                             QualTarget, QualPolicy, Context);
 
@@ -210,7 +207,7 @@ Optional<FixItHint> addQualifierToVarDecl(const VarDecl &Var,
                          ParenStrippedType->getPointeeType().getTypePtr(),
                          QualTarget, QualPolicy, Context);
 
-  if (isArrayType(ParenStrippedType)) {
+  if (ParenStrippedType->isArrayType()) {
     const Type *AT = ParenStrippedType->getBaseElementTypeUnsafe();
     assert(AT && "Did not retrieve array element type for an array.");
 
