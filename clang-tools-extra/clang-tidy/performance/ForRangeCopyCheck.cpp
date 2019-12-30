@@ -111,9 +111,9 @@ bool ForRangeCopyCheck::handleCopyIsOnlyConstReferenced(
         "making it a const reference");
 
     if (llvm::Optional<FixItHint> Fix = utils::fixit::addQualifierToVarDecl(
-            LoopVar, Context, DeclSpec::TQ::TQ_const)) {
+            LoopVar, Context, DeclSpec::TQ::TQ_const))
       Diag << *Fix << utils::fixit::changeVarDeclToReference(LoopVar, Context);
-    }
+
     return true;
   }
   return false;
