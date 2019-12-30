@@ -49,7 +49,7 @@ skipLParensBackwards(SourceLocation Start, const ASTContext &Context) {
                                 Context.getLangOpts());
     return T.is(tok::l_paren);
   };
-  while (PreviousTokenLParen()) {
+  while (Start.isValid() && PreviousTokenLParen()) {
     if (locDangerous(Start))
       return None;
     Start = lexer::findPreviousTokenStart(Start, Context.getSourceManager(),

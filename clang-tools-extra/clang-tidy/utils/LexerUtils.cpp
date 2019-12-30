@@ -17,7 +17,11 @@ Token getPreviousToken(SourceLocation Location, const SourceManager &SM,
                        const LangOptions &LangOpts, bool SkipComments) {
   Token Token;
   Token.setKind(tok::unknown);
+
   Location = Location.getLocWithOffset(-1);
+  if (Location.isInvalid())
+      return Token;
+
   auto StartOfFile = SM.getLocForStartOfFile(SM.getFileID(Location));
   while (Location != StartOfFile) {
     Location = Lexer::GetBeginningOfToken(Location, SM, LangOpts);

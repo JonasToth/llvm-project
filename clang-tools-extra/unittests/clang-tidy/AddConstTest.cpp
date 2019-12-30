@@ -753,6 +753,32 @@ TEST(Macro, MacroTypeReference) {
   EXPECT_NE(Cat("BAD_TYPEDEF target = g;"),
             runCheckOnCode<PointeeRTransform>(Cat(S)));
 }
+// This failed in LLVM.
+TEST(Macro, Variable) {
+  StringRef M = "#define DEBUG(X) do { if (1) { X; } } while (0)\n";
+  StringRef F = "void foo() ";
+  StringRef V = "{ DEBUG(int target = 42;); }";
+
+  auto Cat = [&](StringRef S) { return (M + F + V).str(); };
+
+  EXPECT_EQ(Cat("{ DEBUG(const int target = 42;); }"),
+            runCheckOnCode<ValueLTransform>(Cat(V)));
+  EXPECT_EQ(Cat("{ DEBUG(int const target = 42;); }"),
+            runCheckOnCode<ValueRTransform>(Cat(V)));
+}
+TEST(Macro, RangeLoop) {
+  StringRef M = "#define DEBUG(X) do { if (1) { X; }} while (false)\n";
+  StringRef F = "void foo() { char array[] = {'a', 'b', 'c'}; ";
+  StringRef V = "DEBUG( for(auto& v: array) 10 + v; );";
+  StringRef E = "}";
+
+  auto Cat = [&](StringRef S) { return (M + F + V + E).str(); };
+
+  EXPECT_EQ(Cat("DEBUG( for(const auto& v: array); );"),
+            runCheckOnCode<ValueLTransform>(Cat(V)));
+  EXPECT_EQ(Cat("DEBUG( for(auto const& v: array); );"),
+            runCheckOnCode<ValueRTransform>(Cat(V)));
+}
 
 // ----------------------------------------------------------------------------
 // Test template code.
@@ -975,32 +1001,6 @@ TEST(Template, SpecializedTemplate) {
             runCheckOnCode<PointeeLTransform>(Cat(S)));
   EXPECT_EQ(Cat("{ TS<double> const target(42.42); }"),
             runCheckOnCode<PointeeRTransform>(Cat(S)));
-}
-
-TEST(Macro, Variable) {
-  StringRef M = "#define DEBUG(X) do { if (1) { X; } } while (0)\n";
-  StringRef F = "void foo() ";
-  StringRef V = "{ DEBUG(int target = 42;); }";
-
-  auto Cat = [&](StringRef S) { return (M + F + V).str(); };
-
-  EXPECT_EQ(Cat("{ DEBUG(const int target = 42;); }"),
-            runCheckOnCode<ValueLTransform>(Cat(V)));
-  EXPECT_EQ(Cat("{ DEBUG(int const target = 42;); }"),
-            runCheckOnCode<ValueRTransform>(Cat(V)));
-}
-TEST(Macro, RangeLoop) {
-  StringRef M = "#define DEBUG(X) do { if (1) { X; } } while (0)\n";
-  StringRef F = "void foo() { char[] array = {'a', 'b', 'c'}; ";
-  StringRef V = "DEBUG( for(auto& v: array); );";
-  StringRef E = "}";
-
-  auto Cat = [&](StringRef S) { return (M + F + V + E).str(); };
-
-  EXPECT_EQ(Cat("DEBUG( for(const auto& v: array); );"),
-            runCheckOnCode<ValueLTransform>(Cat(V)));
-  EXPECT_EQ(Cat("DEBUG( for(auto const& v: array); );"),
-            runCheckOnCode<ValueRTransform>(Cat(V)));
 }
 
 } // namespace test
