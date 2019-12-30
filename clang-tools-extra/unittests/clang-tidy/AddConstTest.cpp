@@ -977,6 +977,19 @@ TEST(Template, SpecializedTemplate) {
             runCheckOnCode<PointeeRTransform>(Cat(S)));
 }
 
+TEST(Macro, VariableInMacro) {
+  StringRef M = "#define DEBUG(X) do { X; } while (0)\n";
+  StringRef F = "void foo() ";
+  StringRef V = "{ DEBUG(int target = 42;); }";
+
+  auto Cat = [&](StringRef S) { return (M + F + V).str(); };
+
+  EXPECT_EQ(Cat("{ DEBUG(const int target = 42;); }"),
+            runCheckOnCode<ValueLTransform>(Cat(V)));
+  EXPECT_EQ(Cat("{ DEBUG(int const target = 42;); }"),
+            runCheckOnCode<ValueRTransform>(Cat(V)));
+}
+
 } // namespace test
 } // namespace tidy
 } // namespace clang
