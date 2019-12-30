@@ -977,8 +977,8 @@ TEST(Template, SpecializedTemplate) {
             runCheckOnCode<PointeeRTransform>(Cat(S)));
 }
 
-TEST(Macro, VariableInMacro) {
-  StringRef M = "#define DEBUG(X) do { X; } while (0)\n";
+TEST(Macro, Variable) {
+  StringRef M = "#define DEBUG(X) do { if (1) { X; } } while (0)\n";
   StringRef F = "void foo() ";
   StringRef V = "{ DEBUG(int target = 42;); }";
 
@@ -987,6 +987,19 @@ TEST(Macro, VariableInMacro) {
   EXPECT_EQ(Cat("{ DEBUG(const int target = 42;); }"),
             runCheckOnCode<ValueLTransform>(Cat(V)));
   EXPECT_EQ(Cat("{ DEBUG(int const target = 42;); }"),
+            runCheckOnCode<ValueRTransform>(Cat(V)));
+}
+TEST(Macro, RangeLoop) {
+  StringRef M = "#define DEBUG(X) do { if (1) { X; } } while (0)\n";
+  StringRef F = "void foo() { char[] array = {'a', 'b', 'c'}; ";
+  StringRef V = "DEBUG( for(auto& v: array); );";
+  StringRef E = "}";
+
+  auto Cat = [&](StringRef S) { return (M + F + V + E).str(); };
+
+  EXPECT_EQ(Cat("DEBUG( for(const auto& v: array); );"),
+            runCheckOnCode<ValueLTransform>(Cat(V)));
+  EXPECT_EQ(Cat("DEBUG( for(auto const& v: array); );"),
             runCheckOnCode<ValueRTransform>(Cat(V)));
 }
 
