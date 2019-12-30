@@ -1086,59 +1086,14 @@ def MipsMemAsmOperand : AsmOperandClass {
   let ParserMethod = "parseMemOperand";
 }
 
-def MipsMemSimm9AsmOperand : AsmOperandClass {
-  let Name = "MemOffsetSimm9";
+class MipsMemSimmAsmOperand<int Width, int Shift = 0> : AsmOperandClass {
+  let Name = "MemOffsetSimm" # Width # "_" # Shift;
   let SuperClasses = [MipsMemAsmOperand];
   let RenderMethod = "addMemOperands";
   let ParserMethod = "parseMemOperand";
-  let PredicateMethod = "isMemWithSimmOffset<9>";
-  let DiagnosticType = "MemSImm9";
-}
-
-def MipsMemSimm10AsmOperand : AsmOperandClass {
-  let Name = "MemOffsetSimm10";
-  let SuperClasses = [MipsMemAsmOperand];
-  let RenderMethod = "addMemOperands";
-  let ParserMethod = "parseMemOperand";
-  let PredicateMethod = "isMemWithSimmOffset<10>";
-  let DiagnosticType = "MemSImm10";
-}
-
-def MipsMemSimm12AsmOperand : AsmOperandClass {
-  let Name = "MemOffsetSimm12";
-  let SuperClasses = [MipsMemAsmOperand];
-  let RenderMethod = "addMemOperands";
-  let ParserMethod = "parseMemOperand";
-  let PredicateMethod = "isMemWithSimmOffset<12>";
-  let DiagnosticType = "MemSImm12";
-}
-
-foreach I = {1, 2, 3} in
-  def MipsMemSimm10Lsl # I # AsmOperand : AsmOperandClass {
-    let Name = "MemOffsetSimm10_" # I;
-    let SuperClasses = [MipsMemAsmOperand];
-    let RenderMethod = "addMemOperands";
-    let ParserMethod = "parseMemOperand";
-    let PredicateMethod = "isMemWithSimmOffset<10, " # I # ">";
-    let DiagnosticType = "MemSImm10Lsl" # I;
-  }
-
-def MipsMemSimm11AsmOperand : AsmOperandClass {
-  let Name = "MemOffsetSimm11";
-  let SuperClasses = [MipsMemAsmOperand];
-  let RenderMethod = "addMemOperands";
-  let ParserMethod = "parseMemOperand";
-  let PredicateMethod = "isMemWithSimmOffset<11>";
-  let DiagnosticType = "MemSImm11";
-}
-
-def MipsMemSimm16AsmOperand : AsmOperandClass {
-  let Name = "MemOffsetSimm16";
-  let SuperClasses = [MipsMemAsmOperand];
-  let RenderMethod = "addMemOperands";
-  let ParserMethod = "parseMemOperand";
-  let PredicateMethod = "isMemWithSimmOffset<16>";
-  let DiagnosticType = "MemSImm16";
+  let PredicateMethod = "isMemWithSimmOffset<" # Width # ", " # Shift # ">";
+  let DiagnosticType = !if(!eq(Shift, 0), "MemSImm" # Width,
+                                          "MemSImm" # Width # "Lsl" # Shift);
 }
 
 def MipsMemSimmPtrAsmOperand : AsmOperandClass {
@@ -1185,43 +1140,25 @@ def simm12 : Operand<i32> {
   let DecoderMethod = "DecodeSimm12";
 }
 
-def mem_simm9 : mem_generic {
+def mem_simm9_exp : mem_generic {
   let MIOperandInfo = (ops ptr_rc, simm9);
-  let EncoderMethod = "getMemEncoding";
-  let ParserMatchClass = MipsMemSimm9AsmOperand;
+  let ParserMatchClass = MipsMemSimmPtrAsmOperand;
+  let OperandNamespace = "MipsII";
+  let OperandType = "OPERAND_MEM_SIMM9";
 }
 
-def mem_simm10 : mem_generic {
-  let MIOperandInfo = (ops ptr_rc, simm10);
-  let EncoderMethod = "getMemEncoding";
-  let ParserMatchClass = MipsMemSimm10AsmOperand;
-}
+foreach I = {9, 10, 11, 12, 16} in
+  def mem_simm # I : mem_generic {
+    let MIOperandInfo = (ops ptr_rc, !cast<Operand>("simm" # I));
+    let ParserMatchClass = MipsMemSimmAsmOperand<I>;
+  }
 
 foreach I = {1, 2, 3} in
   def mem_simm10_lsl # I : mem_generic {
     let MIOperandInfo = (ops ptr_rc, !cast<Operand>("simm10_lsl" # I));
     let EncoderMethod = "getMemEncoding<" # I  # ">";
-    let ParserMatchClass =
-            !cast<AsmOperandClass>("MipsMemSimm10Lsl" # I # "AsmOperand");
+    let ParserMatchClass = MipsMemSimmAsmOperand<10, I>;
   }
-
-def mem_simm11 : mem_generic {
-  let MIOperandInfo = (ops ptr_rc, simm11);
-  let EncoderMethod = "getMemEncoding";
-  let ParserMatchClass = MipsMemSimm11AsmOperand;
-}
-
-def mem_simm12 : mem_generic {
-  let MIOperandInfo = (ops ptr_rc, simm12);
-  let EncoderMethod = "getMemEncoding";
-  let ParserMatchClass = MipsMemSimm12AsmOperand;
-}
-
-def mem_simm16 : mem_generic {
-  let MIOperandInfo = (ops ptr_rc, simm16);
-  let EncoderMethod = "getMemEncoding";
-  let ParserMatchClass = MipsMemSimm16AsmOperand;
-}
 
 def mem_simmptr : mem_generic {
   let ParserMatchClass = MipsMemSimmPtrAsmOperand;
@@ -1988,6 +1925,18 @@ let usesCustomInserter = 1 in {
   def ATOMIC_CMP_SWAP_I16  : AtomicCmpSwap<atomic_cmp_swap_16, GPR32>;
   def ATOMIC_CMP_SWAP_I32  : AtomicCmpSwap<atomic_cmp_swap_32, GPR32>;
 
+  def ATOMIC_LOAD_MIN_I8   : Atomic2Ops<atomic_load_min_8, GPR32>;
+  def ATOMIC_LOAD_MIN_I16  : Atomic2Ops<atomic_load_min_16, GPR32>;
+  def ATOMIC_LOAD_MIN_I32  : Atomic2Ops<atomic_load_min_32, GPR32>;
+  def ATOMIC_LOAD_MAX_I8   : Atomic2Ops<atomic_load_max_8, GPR32>;
+  def ATOMIC_LOAD_MAX_I16  : Atomic2Ops<atomic_load_max_16, GPR32>;
+  def ATOMIC_LOAD_MAX_I32  : Atomic2Ops<atomic_load_max_32, GPR32>;
+  def ATOMIC_LOAD_UMIN_I8  : Atomic2Ops<atomic_load_umin_8, GPR32>;
+  def ATOMIC_LOAD_UMIN_I16 : Atomic2Ops<atomic_load_umin_16, GPR32>;
+  def ATOMIC_LOAD_UMIN_I32 : Atomic2Ops<atomic_load_umin_32, GPR32>;
+  def ATOMIC_LOAD_UMAX_I8  : Atomic2Ops<atomic_load_umax_8, GPR32>;
+  def ATOMIC_LOAD_UMAX_I16 : Atomic2Ops<atomic_load_umax_16, GPR32>;
+  def ATOMIC_LOAD_UMAX_I32 : Atomic2Ops<atomic_load_umax_32, GPR32>;
 }
 
 def ATOMIC_LOAD_ADD_I8_POSTRA   : Atomic2OpsSubwordPostRA<GPR32>;
@@ -2016,6 +1965,19 @@ def ATOMIC_SWAP_I32_POSTRA : Atomic2OpsPostRA<GPR32>;
 def ATOMIC_CMP_SWAP_I8_POSTRA : AtomicCmpSwapSubwordPostRA<GPR32>;
 def ATOMIC_CMP_SWAP_I16_POSTRA : AtomicCmpSwapSubwordPostRA<GPR32>;
 def ATOMIC_CMP_SWAP_I32_POSTRA : AtomicCmpSwapPostRA<GPR32>;
+
+def ATOMIC_LOAD_MIN_I8_POSTRA   : Atomic2OpsSubwordPostRA<GPR32>;
+def ATOMIC_LOAD_MIN_I16_POSTRA  : Atomic2OpsSubwordPostRA<GPR32>;
+def ATOMIC_LOAD_MIN_I32_POSTRA  : Atomic2OpsPostRA<GPR32>;
+def ATOMIC_LOAD_MAX_I8_POSTRA   : Atomic2OpsSubwordPostRA<GPR32>;
+def ATOMIC_LOAD_MAX_I16_POSTRA  : Atomic2OpsSubwordPostRA<GPR32>;
+def ATOMIC_LOAD_MAX_I32_POSTRA  : Atomic2OpsPostRA<GPR32>;
+def ATOMIC_LOAD_UMIN_I8_POSTRA  : Atomic2OpsSubwordPostRA<GPR32>;
+def ATOMIC_LOAD_UMIN_I16_POSTRA : Atomic2OpsSubwordPostRA<GPR32>;
+def ATOMIC_LOAD_UMIN_I32_POSTRA : Atomic2OpsPostRA<GPR32>;
+def ATOMIC_LOAD_UMAX_I8_POSTRA  : Atomic2OpsSubwordPostRA<GPR32>;
+def ATOMIC_LOAD_UMAX_I16_POSTRA : Atomic2OpsSubwordPostRA<GPR32>;
+def ATOMIC_LOAD_UMAX_I32_POSTRA : Atomic2OpsPostRA<GPR32>;
 
 /// Pseudo instructions for loading and storing accumulator registers.
 let isPseudo = 1, isCodeGenOnly = 1, hasNoSchedulingInfo = 1 in {

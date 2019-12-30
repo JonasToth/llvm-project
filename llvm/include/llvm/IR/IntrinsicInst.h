@@ -215,40 +215,22 @@ namespace llvm {
     Optional<fp::ExceptionBehavior> getExceptionBehavior() const;
 
     // Methods for support type inquiry through isa, cast, and dyn_cast:
+    static bool classof(const IntrinsicInst *I);
+    static bool classof(const Value *V) {
+      return isa<IntrinsicInst>(V) && classof(cast<IntrinsicInst>(V));
+    }
+  };
+
+  /// Constrained floating point compare intrinsics.
+  class ConstrainedFPCmpIntrinsic : public ConstrainedFPIntrinsic {
+  public:
+    FCmpInst::Predicate getPredicate() const;
+
+    // Methods for support type inquiry through isa, cast, and dyn_cast:
     static bool classof(const IntrinsicInst *I) {
       switch (I->getIntrinsicID()) {
-      case Intrinsic::experimental_constrained_fadd:
-      case Intrinsic::experimental_constrained_fsub:
-      case Intrinsic::experimental_constrained_fmul:
-      case Intrinsic::experimental_constrained_fdiv:
-      case Intrinsic::experimental_constrained_frem:
-      case Intrinsic::experimental_constrained_fma:
-      case Intrinsic::experimental_constrained_fptosi:
-      case Intrinsic::experimental_constrained_fptoui:
-      case Intrinsic::experimental_constrained_fptrunc:
-      case Intrinsic::experimental_constrained_fpext:
-      case Intrinsic::experimental_constrained_sqrt:
-      case Intrinsic::experimental_constrained_pow:
-      case Intrinsic::experimental_constrained_powi:
-      case Intrinsic::experimental_constrained_sin:
-      case Intrinsic::experimental_constrained_cos:
-      case Intrinsic::experimental_constrained_exp:
-      case Intrinsic::experimental_constrained_exp2:
-      case Intrinsic::experimental_constrained_log:
-      case Intrinsic::experimental_constrained_log10:
-      case Intrinsic::experimental_constrained_log2:
-      case Intrinsic::experimental_constrained_lrint:
-      case Intrinsic::experimental_constrained_llrint:
-      case Intrinsic::experimental_constrained_rint:
-      case Intrinsic::experimental_constrained_nearbyint:
-      case Intrinsic::experimental_constrained_maxnum:
-      case Intrinsic::experimental_constrained_minnum:
-      case Intrinsic::experimental_constrained_ceil:
-      case Intrinsic::experimental_constrained_floor:
-      case Intrinsic::experimental_constrained_lround:
-      case Intrinsic::experimental_constrained_llround:
-      case Intrinsic::experimental_constrained_round:
-      case Intrinsic::experimental_constrained_trunc:
+      case Intrinsic::experimental_constrained_fcmp:
+      case Intrinsic::experimental_constrained_fcmps:
         return true;
       default: return false;
       }
@@ -366,7 +348,10 @@ namespace llvm {
       return cast<PointerType>(getRawDest()->getType())->getAddressSpace();
     }
 
+    /// FIXME: Remove this function once transition to Align is over.
+    /// Use getDestAlign() instead.
     unsigned getDestAlignment() const { return getParamAlignment(ARG_DEST); }
+    MaybeAlign getDestAlign() const { return getParamAlign(ARG_DEST); }
 
     /// Set the specified arguments of the instruction.
     void setDest(Value *Ptr) {
@@ -375,11 +360,21 @@ namespace llvm {
       setArgOperand(ARG_DEST, Ptr);
     }
 
+    /// FIXME: Remove this function once transition to Align is over.
+    /// Use the version that takes MaybeAlign instead of this one.
     void setDestAlignment(unsigned Alignment) {
+      setDestAlignment(MaybeAlign(Alignment));
+    }
+    void setDestAlignment(MaybeAlign Alignment) {
       removeParamAttr(ARG_DEST, Attribute::Alignment);
-      if (Alignment > 0)
-        addParamAttr(ARG_DEST, Attribute::getWithAlignment(getContext(),
-                                                           Align(Alignment)));
+      if (Alignment)
+        addParamAttr(ARG_DEST,
+                     Attribute::getWithAlignment(getContext(), *Alignment));
+    }
+    void setDestAlignment(Align Alignment) {
+      removeParamAttr(ARG_DEST, Attribute::Alignment);
+      addParamAttr(ARG_DEST,
+                   Attribute::getWithAlignment(getContext(), Alignment));
     }
 
     void setLength(Value *L) {
@@ -414,8 +409,14 @@ namespace llvm {
       return cast<PointerType>(getRawSource()->getType())->getAddressSpace();
     }
 
+    /// FIXME: Remove this function once transition to Align is over.
+    /// Use getSourceAlign() instead.
     unsigned getSourceAlignment() const {
       return BaseCL::getParamAlignment(ARG_SOURCE);
+    }
+
+    MaybeAlign getSourceAlign() const {
+      return BaseCL::getParamAlign(ARG_SOURCE);
     }
 
     void setSource(Value *Ptr) {
@@ -424,12 +425,21 @@ namespace llvm {
       BaseCL::setArgOperand(ARG_SOURCE, Ptr);
     }
 
+    /// FIXME: Remove this function once transition to Align is over.
+    /// Use the version that takes MaybeAlign instead of this one.
     void setSourceAlignment(unsigned Alignment) {
+      setSourceAlignment(MaybeAlign(Alignment));
+    }
+    void setSourceAlignment(MaybeAlign Alignment) {
       BaseCL::removeParamAttr(ARG_SOURCE, Attribute::Alignment);
-      if (Alignment > 0)
-        BaseCL::addParamAttr(ARG_SOURCE,
-                             Attribute::getWithAlignment(BaseCL::getContext(),
-                                                         Align(Alignment)));
+      if (Alignment)
+        BaseCL::addParamAttr(ARG_SOURCE, Attribute::getWithAlignment(
+                                             BaseCL::getContext(), *Alignment));
+    }
+    void setSourceAlignment(Align Alignment) {
+      BaseCL::removeParamAttr(ARG_SOURCE, Attribute::Alignment);
+      BaseCL::addParamAttr(ARG_SOURCE, Attribute::getWithAlignment(
+                                           BaseCL::getContext(), Alignment));
     }
   };
 

@@ -307,11 +307,10 @@ DIDerivedType *DIBuilder::createReferenceType(
 DIDerivedType *DIBuilder::createTypedef(DIType *Ty, StringRef Name,
                                         DIFile *File, unsigned LineNo,
                                         DIScope *Context,
-                                        Optional<unsigned> AlignInBits) {
+                                        uint32_t AlignInBits) {
   return DIDerivedType::get(VMContext, dwarf::DW_TAG_typedef, Name, File,
                             LineNo, getNonCompileUnitScope(Context), Ty, 0,
-                            AlignInBits.hasValue() ? AlignInBits.getValue() : 0,
-                            0, None, DINode::FlagZero);
+                            AlignInBits, 0, None, DINode::FlagZero);
 }
 
 DIDerivedType *DIBuilder::createFriend(DIType *Ty, DIType *FriendTy) {
@@ -641,14 +640,15 @@ static void checkGlobalVariableScope(DIScope *Context) {
 
 DIGlobalVariableExpression *DIBuilder::createGlobalVariableExpression(
     DIScope *Context, StringRef Name, StringRef LinkageName, DIFile *F,
-    unsigned LineNumber, DIType *Ty, bool isLocalToUnit, DIExpression *Expr,
-    MDNode *Decl, MDTuple *templateParams, uint32_t AlignInBits) {
+    unsigned LineNumber, DIType *Ty, bool IsLocalToUnit,
+    bool isDefined, DIExpression *Expr,
+    MDNode *Decl, MDTuple *TemplateParams, uint32_t AlignInBits) {
   checkGlobalVariableScope(Context);
 
   auto *GV = DIGlobalVariable::getDistinct(
       VMContext, cast_or_null<DIScope>(Context), Name, LinkageName, F,
-      LineNumber, Ty, isLocalToUnit, true, cast_or_null<DIDerivedType>(Decl),
-      templateParams, AlignInBits);
+      LineNumber, Ty, IsLocalToUnit, isDefined, cast_or_null<DIDerivedType>(Decl),
+      TemplateParams, AlignInBits);
   if (!Expr)
     Expr = createExpression();
   auto *N = DIGlobalVariableExpression::get(VMContext, GV, Expr);
@@ -658,14 +658,14 @@ DIGlobalVariableExpression *DIBuilder::createGlobalVariableExpression(
 
 DIGlobalVariable *DIBuilder::createTempGlobalVariableFwdDecl(
     DIScope *Context, StringRef Name, StringRef LinkageName, DIFile *F,
-    unsigned LineNumber, DIType *Ty, bool isLocalToUnit, MDNode *Decl,
-    MDTuple *templateParams, uint32_t AlignInBits) {
+    unsigned LineNumber, DIType *Ty, bool IsLocalToUnit, MDNode *Decl,
+    MDTuple *TemplateParams, uint32_t AlignInBits) {
   checkGlobalVariableScope(Context);
 
   return DIGlobalVariable::getTemporary(
              VMContext, cast_or_null<DIScope>(Context), Name, LinkageName, F,
-             LineNumber, Ty, isLocalToUnit, false,
-             cast_or_null<DIDerivedType>(Decl), templateParams, AlignInBits)
+             LineNumber, Ty, IsLocalToUnit, false,
+             cast_or_null<DIDerivedType>(Decl), TemplateParams, AlignInBits)
       .release();
 }
 
@@ -830,9 +830,9 @@ DINamespace *DIBuilder::createNameSpace(DIScope *Scope, StringRef Name,
 DIModule *DIBuilder::createModule(DIScope *Scope, StringRef Name,
                                   StringRef ConfigurationMacros,
                                   StringRef IncludePath,
-                                  StringRef ISysRoot) {
+                                  StringRef SysRoot) {
  return DIModule::get(VMContext, getNonCompileUnitScope(Scope), Name,
-                      ConfigurationMacros, IncludePath, ISysRoot);
+                      ConfigurationMacros, IncludePath, SysRoot);
 }
 
 DILexicalBlockFile *DIBuilder::createLexicalBlockFile(DIScope *Scope,

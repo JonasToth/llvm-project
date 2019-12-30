@@ -37,6 +37,7 @@
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/IntrinsicsR600.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -226,10 +227,8 @@ R600TargetLowering::R600TargetLowering(const TargetMachine &TM,
     setOperationAction(ISD::FMA, MVT::f64, Expand);
   }
 
-  // FIXME: This was moved from AMDGPUTargetLowering, I'm not sure if we
-  // need it for R600.
-  if (!Subtarget->hasFP32Denormals())
-    setOperationAction(ISD::FMAD, MVT::f32, Legal);
+  // FIXME: May need no denormals check
+  setOperationAction(ISD::FMAD, MVT::f32, Legal);
 
   if (!Subtarget->hasBFI()) {
     // fcopysign can be done in a single instruction with BFI.
@@ -975,8 +974,7 @@ SDValue R600TargetLowering::LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const 
   // Move hardware True/False values to the correct operand.
   if (isHWTrueValue(False) && isHWFalseValue(True)) {
     ISD::CondCode CCOpcode = cast<CondCodeSDNode>(CC)->get();
-    ISD::CondCode InverseCC =
-        ISD::getSetCCInverse(CCOpcode, CompareVT == MVT::i32);
+    ISD::CondCode InverseCC = ISD::getSetCCInverse(CCOpcode, CompareVT);
     if (isCondCodeLegal(InverseCC, CompareVT.getSimpleVT())) {
       std::swap(False, True);
       CC = DAG.getCondCode(InverseCC);
@@ -1016,7 +1014,7 @@ SDValue R600TargetLowering::LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const 
       CC = DAG.getCondCode(CCSwapped);
     } else {
       // Try inverting the conditon and then swapping the operands
-      ISD::CondCode CCInv = ISD::getSetCCInverse(CCOpcode, CompareVT.isInteger());
+      ISD::CondCode CCInv = ISD::getSetCCInverse(CCOpcode, CompareVT);
       CCSwapped = ISD::getSetCCSwappedOperands(CCInv);
       if (isCondCodeLegal(CCSwapped, CompareVT.getSimpleVT())) {
         std::swap(True, False);
@@ -1042,7 +1040,7 @@ SDValue R600TargetLowering::LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const 
     case ISD::SETONE:
     case ISD::SETUNE:
     case ISD::SETNE:
-      CCOpcode = ISD::getSetCCInverse(CCOpcode, CompareVT == MVT::i32);
+      CCOpcode = ISD::getSetCCInverse(CCOpcode, CompareVT);
       Temp = True;
       True = False;
       False = Temp;
@@ -1177,8 +1175,7 @@ SDValue R600TargetLowering::lowerPrivateTruncStore(StoreSDNode *Store,
 
   // Load dword
   // TODO: can we be smarter about machine pointer info?
-  MachinePointerInfo PtrInfo(UndefValue::get(
-      Type::getInt32PtrTy(*DAG.getContext(), AMDGPUAS::PRIVATE_ADDRESS)));
+  MachinePointerInfo PtrInfo(AMDGPUAS::PRIVATE_ADDRESS);
   SDValue Dst = DAG.getLoad(MVT::i32, DL, Chain, Ptr, PtrInfo);
 
   Chain = Dst.getValue(1);
@@ -1408,8 +1405,7 @@ SDValue R600TargetLowering::lowerPrivateExtLoad(SDValue Op,
 
   // Load dword
   // TODO: can we be smarter about machine pointer info?
-  MachinePointerInfo PtrInfo(UndefValue::get(
-      Type::getInt32PtrTy(*DAG.getContext(), AMDGPUAS::PRIVATE_ADDRESS)));
+  MachinePointerInfo PtrInfo(AMDGPUAS::PRIVATE_ADDRESS);
   SDValue Read = DAG.getLoad(MVT::i32, DL, Chain, Ptr, PtrInfo);
 
   // Get offset within the register.
@@ -1610,9 +1606,6 @@ SDValue R600TargetLowering::LowerFormalArguments(
       continue;
     }
 
-    PointerType *PtrTy = PointerType::get(VT.getTypeForEVT(*DAG.getContext()),
-                                          AMDGPUAS::PARAM_I_ADDRESS);
-
     // i64 isn't a legal type, so the register type used ends up as i32, which
     // isn't expected here. It attempts to create this sextload, but it ends up
     // being invalid. Somehow this seems to work with i64 arguments, but breaks
@@ -1633,11 +1626,10 @@ SDValue R600TargetLowering::LowerFormalArguments(
     // XXX - I think PartOffset should give you this, but it seems to give the
     // size of the register which isn't useful.
 
-    unsigned ValBase = ArgLocs[In.getOrigArgIndex()].getLocMemOffset();
     unsigned PartOffset = VA.getLocMemOffset();
     unsigned Alignment = MinAlign(VT.getStoreSize(), PartOffset);
 
-    MachinePointerInfo PtrInfo(UndefValue::get(PtrTy), PartOffset - ValBase);
+    MachinePointerInfo PtrInfo(AMDGPUAS::PARAM_I_ADDRESS);
     SDValue Arg = DAG.getLoad(
         ISD::UNINDEXED, Ext, VT, DL, Chain,
         DAG.getConstant(PartOffset, DL, MVT::i32), DAG.getUNDEF(MVT::i32),
@@ -1994,8 +1986,7 @@ SDValue R600TargetLowering::PerformDAGCombine(SDNode *N,
     case ISD::SETNE: return LHS;
     case ISD::SETEQ: {
       ISD::CondCode LHSCC = cast<CondCodeSDNode>(LHS.getOperand(4))->get();
-      LHSCC = ISD::getSetCCInverse(LHSCC,
-                                  LHS.getOperand(0).getValueType().isInteger());
+      LHSCC = ISD::getSetCCInverse(LHSCC, LHS.getOperand(0).getValueType());
       if (DCI.isBeforeLegalizeOps() ||
           isCondCodeLegal(LHSCC, LHS.getOperand(0).getSimpleValueType()))
         return DAG.getSelectCC(DL,

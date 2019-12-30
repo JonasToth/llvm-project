@@ -398,8 +398,12 @@ struct IRPosition {
   /// single attribute of any kind in \p AKs, there are "subsuming" positions
   /// that could have an attribute as well. This method returns all attributes
   /// found in \p Attrs.
+  /// \param IgnoreSubsumingPositions Flag to determine if subsuming positions,
+  ///                                 e.g., the function position if this is an
+  ///                                 argument position, should be ignored.
   void getAttrs(ArrayRef<Attribute::AttrKind> AKs,
-                SmallVectorImpl<Attribute> &Attrs) const;
+                SmallVectorImpl<Attribute> &Attrs,
+                bool IgnoreSubsumingPositions = false) const;
 
   /// Return the attribute of kind \p AK existing in the IR at this position.
   Attribute getAttr(Attribute::AttrKind AK) const {
@@ -819,6 +823,54 @@ struct Attributor {
     return true;
   }
 
+  /// Helper function to replace all uses of \p V with \p NV. Return true if
+  /// there is any change.
+  bool changeValueAfterManifest(Value &V, Value &NV) {
+    bool Changed = false;
+    for (auto &U : V.uses())
+      Changed |= changeUseAfterManifest(U, NV);
+
+    return Changed;
+  }
+
+  /// Get pointer operand of memory accessing instruction. If \p I is
+  /// not a memory accessing instruction, return nullptr. If \p AllowVolatile,
+  /// is set to false and the instruction is volatile, return nullptr.
+  static const Value *getPointerOperand(const Instruction *I,
+                                        bool AllowVolatile) {
+    if (auto *LI = dyn_cast<LoadInst>(I)) {
+      if (!AllowVolatile && LI->isVolatile())
+        return nullptr;
+      return LI->getPointerOperand();
+    }
+
+    if (auto *SI = dyn_cast<StoreInst>(I)) {
+      if (!AllowVolatile && SI->isVolatile())
+        return nullptr;
+      return SI->getPointerOperand();
+    }
+
+    if (auto *CXI = dyn_cast<AtomicCmpXchgInst>(I)) {
+      if (!AllowVolatile && CXI->isVolatile())
+        return nullptr;
+      return CXI->getPointerOperand();
+    }
+
+    if (auto *RMWI = dyn_cast<AtomicRMWInst>(I)) {
+      if (!AllowVolatile && RMWI->isVolatile())
+        return nullptr;
+      return RMWI->getPointerOperand();
+    }
+
+    return nullptr;
+  }
+
+  /// Record that \p I is to be replaced with `unreachable` after information
+  /// was manifested.
+  void changeToUnreachableAfterManifest(Instruction *I) {
+    ToBeChangedToUnreachableInsts.insert(I);
+  }
+
   /// Record that \p I is deleted after information was manifested. This also
   /// triggers deletion of trivially dead istructions.
   void deleteAfterManifest(Instruction &I) { ToBeDeletedInsts.insert(&I); }
@@ -1026,6 +1078,9 @@ private:
   /// Uses we replace with a new value after manifest is done. We will remove
   /// then trivially dead instructions as well.
   DenseMap<Use *, Value *> ToBeChangedUses;
+
+  /// Instructions we replace with `unreachable` insts after manifest is done.
+  SmallPtrSet<Instruction *, 8> ToBeChangedToUnreachableInsts;
 
   /// Functions, blocks, and instructions we delete after manifest is done.
   ///
@@ -1682,6 +1737,66 @@ struct AAWillReturn
   static const char ID;
 };
 
+/// An abstract attribute for undefined behavior.
+struct AAUndefinedBehavior
+    : public StateWrapper<BooleanState, AbstractAttribute>,
+      public IRPosition {
+  AAUndefinedBehavior(const IRPosition &IRP) : IRPosition(IRP) {}
+
+  /// Return true if "undefined behavior" is assumed.
+  bool isAssumedToCauseUB() const { return getAssumed(); }
+
+  /// Return true if "undefined behavior" is assumed for a specific instruction.
+  virtual bool isAssumedToCauseUB(Instruction *I) const = 0;
+
+  /// Return true if "undefined behavior" is known.
+  bool isKnownToCauseUB() const { return getKnown(); }
+
+  /// Return true if "undefined behavior" is known for a specific instruction.
+  virtual bool isKnownToCauseUB(Instruction *I) const = 0;
+
+  /// Return an IR position, see struct IRPosition.
+  const IRPosition &getIRPosition() const override { return *this; }
+
+  /// Create an abstract attribute view for the position \p IRP.
+  static AAUndefinedBehavior &createForPosition(const IRPosition &IRP,
+                                                Attributor &A);
+
+  /// Unique ID (due to the unique address)
+  static const char ID;
+};
+
+/// An abstract interface to determine reachability of point A to B.
+struct AAReachability : public StateWrapper<BooleanState, AbstractAttribute>,
+                        public IRPosition {
+  AAReachability(const IRPosition &IRP) : IRPosition(IRP) {}
+
+  /// Returns true if 'From' instruction is assumed to reach, 'To' instruction.
+  /// Users should provide two positions they are interested in, and the class
+  /// determines (and caches) reachability.
+  bool isAssumedReachable(const Instruction *From,
+                          const Instruction *To) const {
+    return true;
+  }
+
+  /// Returns true if 'From' instruction is known to reach, 'To' instruction.
+  /// Users should provide two positions they are interested in, and the class
+  /// determines (and caches) reachability.
+  bool isKnownReachable(const Instruction *From, const Instruction *To) const {
+    return true;
+  }
+
+  /// Return an IR position, see struct IRPosition.
+  const IRPosition &getIRPosition() const override { return *this; }
+
+  /// Create an abstract attribute view for the position \p IRP.
+  static AAReachability &createForPosition(const IRPosition &IRP,
+                                           Attributor &A);
+
+  /// Unique ID (due to the unique address)
+  static const char ID;
+};
+
 /// An abstract interface for all noalias attributes.
 struct AANoAlias
     : public IRAttribute<Attribute::NoAlias,
@@ -1789,6 +1904,44 @@ struct DerefState : AbstractState {
   /// State representing for dereferenceable bytes.
   IncIntegerState<> DerefBytesState;
 
+  /// Map representing for accessed memory offsets and sizes.
+  /// A key is Offset and a value is size.
+  /// If there is a load/store instruction something like,
+  ///   p[offset] = v;
+  /// (offset, sizeof(v)) will be inserted to this map.
+  /// std::map is used because we want to iterate keys in ascending order.
+  std::map<int64_t, uint64_t> AccessedBytesMap;
+
+  /// Helper function to calculate dereferenceable bytes from current known
+  /// bytes and accessed bytes.
+  ///
+  /// int f(int *A){
+  ///    *A = 0;
+  ///    *(A+2) = 2;
+  ///    *(A+1) = 1;
+  ///    *(A+10) = 10;
+  /// }
+  /// ```
+  /// In that case, AccessedBytesMap is `{0:4, 4:4, 8:4, 40:4}`.
+  /// AccessedBytesMap is std::map so it is iterated in accending order on
+  /// key(Offset). So KnownBytes will be updated like this:
+  ///
+  /// |Access | KnownBytes
+  /// |(0, 4)| 0 -> 4
+  /// |(4, 4)| 4 -> 8
+  /// |(8, 4)| 8 -> 12
+  /// |(40, 4) | 12 (break)
+  void computeKnownDerefBytesFromAccessedMap() {
+    int64_t KnownBytes = DerefBytesState.getKnown();
+    for (auto &Access : AccessedBytesMap) {
+      if (KnownBytes < Access.first)
+        break;
+      KnownBytes = std::max(KnownBytes, Access.first + (int64_t)Access.second);
+    }
+
+    DerefBytesState.takeKnownMaximum(KnownBytes);
+  }
+
   /// State representing that whether the value is globaly dereferenceable.
   BooleanState GlobalState;
 
@@ -1818,11 +1971,22 @@ struct DerefState : AbstractState {
   /// Update known dereferenceable bytes.
   void takeKnownDerefBytesMaximum(uint64_t Bytes) {
     DerefBytesState.takeKnownMaximum(Bytes);
+
+    // Known bytes might increase.
+    computeKnownDerefBytesFromAccessedMap();
   }
 
   /// Update assumed dereferenceable bytes.
   void takeAssumedDerefBytesMinimum(uint64_t Bytes) {
     DerefBytesState.takeAssumedMinimum(Bytes);
+  }
+
+  /// Add accessed bytes to the map.
+  void addAccessedBytes(int64_t Offset, uint64_t Size) {
+    AccessedBytesMap[Offset] = std::max(AccessedBytesMap[Offset], Size);
+
+    // Known bytes might increase.
+    computeKnownDerefBytesFromAccessedMap();
   }
 
   /// Equality for DerefState.

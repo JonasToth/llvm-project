@@ -37,7 +37,7 @@ using namespace llvm;
 #define DEBUG_TYPE "armtti"
 
 static cl::opt<bool> EnableMaskedLoadStores(
-  "enable-arm-maskedldst", cl::Hidden, cl::init(false),
+  "enable-arm-maskedldst", cl::Hidden, cl::init(true),
   cl::desc("Enable the generation of masked loads and stores"));
 
 static cl::opt<bool> DisableLowOverheadLoops(
@@ -106,7 +106,7 @@ int ARMTTIImpl::getIntImmCodeSizeCost(unsigned Opcode, unsigned Idx,
   return 1;
 }
 
-int ARMTTIImpl::getIntImmCost(unsigned Opcode, unsigned Idx, const APInt &Imm,
+int ARMTTIImpl::getIntImmCostInst(unsigned Opcode, unsigned Idx, const APInt &Imm,
                               Type *Ty) {
   // Division by a constant can be turned into multiplication, but only if we
   // know it's constant. So it's not so much that the immediate is cheap (it's
@@ -642,58 +642,60 @@ int ARMTTIImpl::getShuffleCost(TTI::ShuffleKind Kind, Type *Tp, int Index,
   return BaseCost * BaseT::getShuffleCost(Kind, Tp, Index, SubTp);
 }
 
-int ARMTTIImpl::getArithmeticInstrCost(
-    unsigned Opcode, Type *Ty, TTI::OperandValueKind Op1Info,
-    TTI::OperandValueKind Op2Info, TTI::OperandValueProperties Opd1PropInfo,
-    TTI::OperandValueProperties Opd2PropInfo,
-    ArrayRef<const Value *> Args) {
+int ARMTTIImpl::getArithmeticInstrCost(unsigned Opcode, Type *Ty,
+                                       TTI::OperandValueKind Op1Info,
+                                       TTI::OperandValueKind Op2Info,
+                                       TTI::OperandValueProperties Opd1PropInfo,
+                                       TTI::OperandValueProperties Opd2PropInfo,
+                                       ArrayRef<const Value *> Args,
+                                       const Instruction *CxtI) {
   int ISDOpcode = TLI->InstructionOpcodeToISD(Opcode);
   std::pair<int, MVT> LT = TLI->getTypeLegalizationCost(DL, Ty);
 
-  const unsigned FunctionCallDivCost = 20;
-  const unsigned ReciprocalDivCost = 10;
-  static const CostTblEntry CostTbl[] = {
-    // Division.
-    // These costs are somewhat random. Choose a cost of 20 to indicate that
-    // vectorizing devision (added function call) is going to be very expensive.
-    // Double registers types.
-    { ISD::SDIV, MVT::v1i64, 1 * FunctionCallDivCost},
-    { ISD::UDIV, MVT::v1i64, 1 * FunctionCallDivCost},
-    { ISD::SREM, MVT::v1i64, 1 * FunctionCallDivCost},
-    { ISD::UREM, MVT::v1i64, 1 * FunctionCallDivCost},
-    { ISD::SDIV, MVT::v2i32, 2 * FunctionCallDivCost},
-    { ISD::UDIV, MVT::v2i32, 2 * FunctionCallDivCost},
-    { ISD::SREM, MVT::v2i32, 2 * FunctionCallDivCost},
-    { ISD::UREM, MVT::v2i32, 2 * FunctionCallDivCost},
-    { ISD::SDIV, MVT::v4i16,     ReciprocalDivCost},
-    { ISD::UDIV, MVT::v4i16,     ReciprocalDivCost},
-    { ISD::SREM, MVT::v4i16, 4 * FunctionCallDivCost},
-    { ISD::UREM, MVT::v4i16, 4 * FunctionCallDivCost},
-    { ISD::SDIV, MVT::v8i8,      ReciprocalDivCost},
-    { ISD::UDIV, MVT::v8i8,      ReciprocalDivCost},
-    { ISD::SREM, MVT::v8i8,  8 * FunctionCallDivCost},
-    { ISD::UREM, MVT::v8i8,  8 * FunctionCallDivCost},
-    // Quad register types.
-    { ISD::SDIV, MVT::v2i64, 2 * FunctionCallDivCost},
-    { ISD::UDIV, MVT::v2i64, 2 * FunctionCallDivCost},
-    { ISD::SREM, MVT::v2i64, 2 * FunctionCallDivCost},
-    { ISD::UREM, MVT::v2i64, 2 * FunctionCallDivCost},
-    { ISD::SDIV, MVT::v4i32, 4 * FunctionCallDivCost},
-    { ISD::UDIV, MVT::v4i32, 4 * FunctionCallDivCost},
-    { ISD::SREM, MVT::v4i32, 4 * FunctionCallDivCost},
-    { ISD::UREM, MVT::v4i32, 4 * FunctionCallDivCost},
-    { ISD::SDIV, MVT::v8i16, 8 * FunctionCallDivCost},
-    { ISD::UDIV, MVT::v8i16, 8 * FunctionCallDivCost},
-    { ISD::SREM, MVT::v8i16, 8 * FunctionCallDivCost},
-    { ISD::UREM, MVT::v8i16, 8 * FunctionCallDivCost},
-    { ISD::SDIV, MVT::v16i8, 16 * FunctionCallDivCost},
-    { ISD::UDIV, MVT::v16i8, 16 * FunctionCallDivCost},
-    { ISD::SREM, MVT::v16i8, 16 * FunctionCallDivCost},
-    { ISD::UREM, MVT::v16i8, 16 * FunctionCallDivCost},
-    // Multiplication.
-  };
-
   if (ST->hasNEON()) {
+    const unsigned FunctionCallDivCost = 20;
+    const unsigned ReciprocalDivCost = 10;
+    static const CostTblEntry CostTbl[] = {
+      // Division.
+      // These costs are somewhat random. Choose a cost of 20 to indicate that
+      // vectorizing devision (added function call) is going to be very expensive.
+      // Double registers types.
+      { ISD::SDIV, MVT::v1i64, 1 * FunctionCallDivCost},
+      { ISD::UDIV, MVT::v1i64, 1 * FunctionCallDivCost},
+      { ISD::SREM, MVT::v1i64, 1 * FunctionCallDivCost},
+      { ISD::UREM, MVT::v1i64, 1 * FunctionCallDivCost},
+      { ISD::SDIV, MVT::v2i32, 2 * FunctionCallDivCost},
+      { ISD::UDIV, MVT::v2i32, 2 * FunctionCallDivCost},
+      { ISD::SREM, MVT::v2i32, 2 * FunctionCallDivCost},
+      { ISD::UREM, MVT::v2i32, 2 * FunctionCallDivCost},
+      { ISD::SDIV, MVT::v4i16,     ReciprocalDivCost},
+      { ISD::UDIV, MVT::v4i16,     ReciprocalDivCost},
+      { ISD::SREM, MVT::v4i16, 4 * FunctionCallDivCost},
+      { ISD::UREM, MVT::v4i16, 4 * FunctionCallDivCost},
+      { ISD::SDIV, MVT::v8i8,      ReciprocalDivCost},
+      { ISD::UDIV, MVT::v8i8,      ReciprocalDivCost},
+      { ISD::SREM, MVT::v8i8,  8 * FunctionCallDivCost},
+      { ISD::UREM, MVT::v8i8,  8 * FunctionCallDivCost},
+      // Quad register types.
+      { ISD::SDIV, MVT::v2i64, 2 * FunctionCallDivCost},
+      { ISD::UDIV, MVT::v2i64, 2 * FunctionCallDivCost},
+      { ISD::SREM, MVT::v2i64, 2 * FunctionCallDivCost},
+      { ISD::UREM, MVT::v2i64, 2 * FunctionCallDivCost},
+      { ISD::SDIV, MVT::v4i32, 4 * FunctionCallDivCost},
+      { ISD::UDIV, MVT::v4i32, 4 * FunctionCallDivCost},
+      { ISD::SREM, MVT::v4i32, 4 * FunctionCallDivCost},
+      { ISD::UREM, MVT::v4i32, 4 * FunctionCallDivCost},
+      { ISD::SDIV, MVT::v8i16, 8 * FunctionCallDivCost},
+      { ISD::UDIV, MVT::v8i16, 8 * FunctionCallDivCost},
+      { ISD::SREM, MVT::v8i16, 8 * FunctionCallDivCost},
+      { ISD::UREM, MVT::v8i16, 8 * FunctionCallDivCost},
+      { ISD::SDIV, MVT::v16i8, 16 * FunctionCallDivCost},
+      { ISD::UDIV, MVT::v16i8, 16 * FunctionCallDivCost},
+      { ISD::SREM, MVT::v16i8, 16 * FunctionCallDivCost},
+      { ISD::UREM, MVT::v16i8, 16 * FunctionCallDivCost},
+      // Multiplication.
+    };
+
     if (const auto *Entry = CostTableLookup(CostTbl, ISDOpcode, LT.second))
       return LT.first * Entry->Cost;
 
@@ -713,6 +715,33 @@ int ARMTTIImpl::getArithmeticInstrCost(
 
     return Cost;
   }
+
+  // If this operation is a shift on arm/thumb2, it might well be folded into
+  // the following instruction, hence having a cost of 0.
+  auto LooksLikeAFreeShift = [&]() {
+    if (ST->isThumb1Only() || Ty->isVectorTy())
+      return false;
+
+    if (!CxtI || !CxtI->hasOneUse() || !CxtI->isShift())
+      return false;
+    if (Op2Info != TargetTransformInfo::OK_UniformConstantValue)
+      return false;
+
+    // Folded into a ADC/ADD/AND/BIC/CMP/EOR/MVN/ORR/ORN/RSB/SBC/SUB
+    switch (cast<Instruction>(CxtI->user_back())->getOpcode()) {
+    case Instruction::Add:
+    case Instruction::Sub:
+    case Instruction::And:
+    case Instruction::Xor:
+    case Instruction::Or:
+    case Instruction::ICmp:
+      return true;
+    default:
+      return false;
+    }
+  };
+  if (LooksLikeAFreeShift())
+    return 0;
 
   int BaseCost = ST->hasMVEIntegerOps() && Ty->isVectorTy()
                      ? ST->getMVEVectorCostFactor()
@@ -755,13 +784,10 @@ int ARMTTIImpl::getMemoryOpCost(unsigned Opcode, Type *Src,
   return BaseCost * LT.first;
 }
 
-int ARMTTIImpl::getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy,
-                                           unsigned Factor,
-                                           ArrayRef<unsigned> Indices,
-                                           unsigned Alignment,
-                                           unsigned AddressSpace,
-                                           bool UseMaskForCond,
-                                           bool UseMaskForGaps) {
+int ARMTTIImpl::getInterleavedMemoryOpCost(
+    unsigned Opcode, Type *VecTy, unsigned Factor, ArrayRef<unsigned> Indices,
+    unsigned Alignment, unsigned AddressSpace, bool UseMaskForCond,
+    bool UseMaskForGaps) {
   assert(Factor >= 2 && "Invalid interleave factor");
   assert(isa<VectorType>(VecTy) && "Expect a vector type");
 
@@ -776,9 +802,19 @@ int ARMTTIImpl::getInterleavedMemoryOpCost(unsigned Opcode, Type *VecTy,
     // vldN/vstN only support legal vector types of size 64 or 128 in bits.
     // Accesses having vector types that are a multiple of 128 bits can be
     // matched to more than one vldN/vstN instruction.
+    int BaseCost = ST->hasMVEIntegerOps() ? ST->getMVEVectorCostFactor() : 1;
     if (NumElts % Factor == 0 &&
-        TLI->isLegalInterleavedAccessType(SubVecTy, DL))
-      return Factor * TLI->getNumInterleavedAccesses(SubVecTy, DL);
+        TLI->isLegalInterleavedAccessType(Factor, SubVecTy, DL))
+      return Factor * BaseCost * TLI->getNumInterleavedAccesses(SubVecTy, DL);
+
+    // Some smaller than legal interleaved patterns are cheap as we can make
+    // use of the vmovn or vrev patterns to interleave a standard load. This is
+    // true for v4i8, v8i8 and v4i16 at least (but not for v4f16 as it is
+    // promoted differently). The cost of 2 here is then a load and vrev or
+    // vmovn.
+    if (ST->hasMVEIntegerOps() && Factor == 2 && NumElts / Factor > 2 &&
+        VecTy->isIntOrIntVectorTy() && DL.getTypeSizeInBits(SubVecTy) <= 64)
+      return 2 * BaseCost;
   }
 
   return BaseT::getInterleavedMemoryOpCost(Opcode, VecTy, Factor, Indices,

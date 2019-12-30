@@ -386,11 +386,10 @@ static bool isWeakObjectWithRWAccess(GlobalValueSummary *GVS) {
 }
 
 static void thinLTOInternalizeAndPromoteGUID(
-    GlobalValueSummaryList &GVSummaryList, ValueInfo VI,
-    function_ref<bool(StringRef, ValueInfo)> isExported,
+    ValueInfo VI, function_ref<bool(StringRef, ValueInfo)> isExported,
     function_ref<bool(GlobalValue::GUID, const GlobalValueSummary *)>
         isPrevailing) {
-  for (auto &S : GVSummaryList) {
+  for (auto &S : VI.getSummaryList()) {
     if (isExported(S->modulePath(), VI)) {
       if (GlobalValue::isLocalLinkage(S->linkage()))
         S->setLinkage(GlobalValue::ExternalLinkage);
@@ -422,8 +421,8 @@ void llvm::thinLTOInternalizeAndPromoteInIndex(
     function_ref<bool(GlobalValue::GUID, const GlobalValueSummary *)>
         isPrevailing) {
   for (auto &I : Index)
-    thinLTOInternalizeAndPromoteGUID(
-        I.second.SummaryList, Index.getValueInfo(I), isExported, isPrevailing);
+    thinLTOInternalizeAndPromoteGUID(Index.getValueInfo(I), isExported,
+                                     isPrevailing);
 }
 
 // Requires a destructor for std::vector<InputModule>.
@@ -1265,7 +1264,8 @@ Error LTO::runThinLTO(AddStreamFn AddStream, NativeObjectCache Cache,
   if (ThinLTO.ModuleMap.empty())
     return Error::success();
 
-  if (Conf.CombinedIndexHook && !Conf.CombinedIndexHook(ThinLTO.CombinedIndex))
+  if (Conf.CombinedIndexHook &&
+      !Conf.CombinedIndexHook(ThinLTO.CombinedIndex, GUIDPreservedSymbols))
     return Error::success();
 
   // Collect for each module the list of function it defines (GUID ->
@@ -1382,8 +1382,12 @@ lto::setupOptimizationRemarks(LLVMContext &Context, StringRef RemarksFilename,
                               StringRef RemarksPasses, StringRef RemarksFormat,
                               bool RemarksWithHotness, int Count) {
   std::string Filename = RemarksFilename;
+  // For ThinLTO, file.opt.<format> becomes
+  // file.opt.<format>.thin.<num>.<format>.
   if (!Filename.empty() && Count != -1)
-    Filename += ".thin." + llvm::utostr(Count) + ".yaml";
+    Filename =
+        (Twine(Filename) + ".thin." + llvm::utostr(Count) + "." + RemarksFormat)
+            .str();
 
   auto ResultOrErr = llvm::setupOptimizationRemarks(
       Context, Filename, RemarksPasses, RemarksFormat, RemarksWithHotness);

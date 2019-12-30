@@ -173,7 +173,7 @@ struct ValueInfo {
     RefAndFlags.setInt(HaveGVs);
   }
 
-  operator bool() const { return getRef(); }
+  explicit operator bool() const { return getRef(); }
 
   GlobalValue::GUID getGUID() const { return getRef()->first; }
   const GlobalValue *getValue() const {
@@ -995,6 +995,13 @@ public:
       : HaveGVs(HaveGVs), EnableSplitLTOUnit(EnableSplitLTOUnit), Saver(Alloc) {
   }
 
+  // Current version for the module summary in bitcode files.
+  // The BitcodeSummaryVersion should be bumped whenever we introduce changes
+  // in the way some record are interpreted, like flags for instance.
+  // Note that incrementing this may require changes in both BitcodeReader.cpp
+  // and BitcodeWriter.cpp.
+  static constexpr uint64_t BitcodeSummaryVersion = 8;
+
   bool haveGVs() const { return HaveGVs; }
 
   gvsummary_iterator begin() { return GlobalValueMap.begin(); }
@@ -1369,7 +1376,9 @@ public:
   void dump() const;
 
   /// Export summary to dot file for GraphViz.
-  void exportToDot(raw_ostream& OS) const;
+  void
+  exportToDot(raw_ostream &OS,
+              const DenseSet<GlobalValue::GUID> &GUIDPreservedSymbols) const;
 
   /// Print out strongly connected components for debugging.
   void dumpSCCs(raw_ostream &OS);

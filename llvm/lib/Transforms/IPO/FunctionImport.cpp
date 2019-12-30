@@ -604,24 +604,26 @@ static void ComputeImportForModule(
 }
 
 #ifndef NDEBUG
-static bool isGlobalVarSummary(const ModuleSummaryIndex &Index,
-                               GlobalValue::GUID G) {
-  if (const auto &VI = Index.getValueInfo(G)) {
-    auto SL = VI.getSummaryList();
-    if (!SL.empty())
-      return SL[0]->getSummaryKind() == GlobalValueSummary::GlobalVarKind;
-  }
-  return false;
+static bool isGlobalVarSummary(const ModuleSummaryIndex &Index, ValueInfo VI) {
+  auto SL = VI.getSummaryList();
+  return SL.empty()
+             ? false
+             : SL[0]->getSummaryKind() == GlobalValueSummary::GlobalVarKind;
 }
 
-static GlobalValue::GUID getGUID(GlobalValue::GUID G) { return G; }
+static bool isGlobalVarSummary(const ModuleSummaryIndex &Index,
+                               GlobalValue::GUID G) {
+  if (const auto &VI = Index.getValueInfo(G))
+    return isGlobalVarSummary(Index, VI);
+  return false;
+}
 
 template <class T>
 static unsigned numGlobalVarSummaries(const ModuleSummaryIndex &Index,
                                       T &Cont) {
   unsigned NumGVS = 0;
   for (auto &V : Cont)
-    if (isGlobalVarSummary(Index, getGUID(V)))
+    if (isGlobalVarSummary(Index, V))
       ++NumGVS;
   return NumGVS;
 }
@@ -899,19 +901,8 @@ void llvm::computeDeadSymbolsWithConstProp(
     function_ref<PrevailingType(GlobalValue::GUID)> isPrevailing,
     bool ImportEnabled) {
   computeDeadSymbols(Index, GUIDPreservedSymbols, isPrevailing);
-  if (ImportEnabled) {
+  if (ImportEnabled)
     Index.propagateAttributes(GUIDPreservedSymbols);
-  } else {
-    // If import is disabled we should drop read/write-only attribute
-    // from all summaries to prevent internalization.
-    for (auto &P : Index)
-      for (auto &S : P.second.SummaryList)
-        if (auto *GVS = dyn_cast<GlobalVarSummary>(S.get())) {
-          GVS->setReadOnly(false);
-          GVS->setWriteOnly(false);
-        }
-  }
-  Index.setWithAttributePropagation();
 }
 
 /// Compute the set of summaries needed for a ThinLTO backend compilation of

@@ -225,12 +225,12 @@ int IRTranslator::getOrCreateFrameIndex(const AllocaInst &AI) {
   if (FrameIndices.find(&AI) != FrameIndices.end())
     return FrameIndices[&AI];
 
-  unsigned ElementSize = DL->getTypeAllocSize(AI.getAllocatedType());
-  unsigned Size =
+  uint64_t ElementSize = DL->getTypeAllocSize(AI.getAllocatedType());
+  uint64_t Size =
       ElementSize * cast<ConstantInt>(AI.getArraySize())->getZExtValue();
 
   // Always allocate at least one byte.
-  Size = std::max(Size, 1u);
+  Size = std::max<uint64_t>(Size, 1u);
 
   unsigned Alignment = AI.getAlignment();
   if (!Alignment)
@@ -1417,7 +1417,8 @@ bool IRTranslator::translateKnownIntrinsic(const CallInst &CI, Intrinsic::ID ID,
     Register Op1 = getOrCreateVReg(*CI.getArgOperand(1));
     Register Op2 = getOrCreateVReg(*CI.getArgOperand(2));
     if (TM.Options.AllowFPOpFusion != FPOpFusion::Strict &&
-        TLI.isFMAFasterThanFMulAndFAdd(TLI.getValueType(*DL, CI.getType()))) {
+        TLI.isFMAFasterThanFMulAndFAdd(*MF,
+                                       TLI.getValueType(*DL, CI.getType()))) {
       // TODO: Revisit this to see if we should move this part of the
       // lowering to the combiner.
       MIRBuilder.buildInstr(TargetOpcode::G_FMA, {Dst}, {Op0, Op1, Op2},
@@ -1592,7 +1593,9 @@ bool IRTranslator::translateCall(const User &U, MachineIRBuilder &MIRBuilder) {
   const Function *F = CI.getCalledFunction();
 
   // FIXME: support Windows dllimport function calls.
-  if (F && F->hasDLLImportStorageClass())
+  if (F && (F->hasDLLImportStorageClass() ||
+            (MF->getTarget().getTargetTriple().isOSWindows() &&
+             F->hasExternalWeakLinkage())))
     return false;
 
   // FIXME: support control flow guard targets.
