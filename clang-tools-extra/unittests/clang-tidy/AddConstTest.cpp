@@ -731,6 +731,7 @@ TEST(Macro, MacroTypePointer) {
             runCheckOnCode<ValueRTransform>(Cat(S)));
 
   // FIXME: Failing even all parts seem to bail-out in for isMacroID()
+  // The macro itself is changed here and below which is not intended.
   EXPECT_NE(Cat("BAD_TYPEDEF target = nullptr;"),
             runCheckOnCode<PointeeRTransform>(Cat(S)));
   EXPECT_EQ(Cat("BAD_TYPEDEF target = nullptr;"),
@@ -769,14 +770,14 @@ TEST(Macro, Variable) {
 TEST(Macro, RangeLoop) {
   StringRef M = "#define DEBUG(X) do { if (1) { X; }} while (false)\n";
   StringRef F = "void foo() { char array[] = {'a', 'b', 'c'}; ";
-  StringRef V = "DEBUG( for(auto& v: array) 10 + v; );";
+  StringRef V = "DEBUG( for(auto& target: array) 10 + target; );";
   StringRef E = "}";
 
   auto Cat = [&](StringRef S) { return (M + F + V + E).str(); };
 
-  EXPECT_EQ(Cat("DEBUG( for(const auto& v: array); );"),
+  EXPECT_EQ(Cat("DEBUG( for(const auto& target: array); );"),
             runCheckOnCode<ValueLTransform>(Cat(V)));
-  EXPECT_EQ(Cat("DEBUG( for(auto const& v: array); );"),
+  EXPECT_EQ(Cat("DEBUG( for(auto const& target: array); );"),
             runCheckOnCode<ValueRTransform>(Cat(V)));
 }
 
