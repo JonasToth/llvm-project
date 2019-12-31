@@ -267,7 +267,15 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
                                  cxxDependentScopeMemberExpr(),
                                  hasType(templateTypeParmType())))),
                hasAnyArgument(maybeEvalCommaExpr(equalsNode(Exp)))),
-      cxxUnresolvedConstructExpr(hasAnyArgument(maybeEvalCommaExpr(equalsNode(Exp)))));
+      cxxUnresolvedConstructExpr(
+          hasAnyArgument(maybeEvalCommaExpr(equalsNode(Exp)))),
+      // Previous False Positive in the following Code:
+      // `template <typename T> void f() { int i = 42; new Type<T>(i); }`
+      // Where the constructor of `Type` takes its argument as reference.
+      // The AST does not resolve in a `cxxConstructExpr` because it is
+      // type-dependent.
+      parenListExpr(allOf(hasParent(cxxNewExpr(isTypeDependent())),
+                          hasDescendant(equalsNode(Exp)))));
 
   // Captured by a lambda by reference.
   // If we're initializing a capture with 'Exp' directly then we're initializing

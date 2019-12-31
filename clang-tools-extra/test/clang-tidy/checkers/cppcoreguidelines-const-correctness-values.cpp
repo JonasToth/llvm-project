@@ -561,3 +561,14 @@ void meta_type() {
   np_local0.alwaysConst();
   np_local0.sometimesConst();
 }
+
+// This test is the essence from llvm/lib/Support/MemoryBuffer.cpp at line 450
+template <typename T>
+struct to_construct : T {
+  to_construct(int &j) {}
+};
+template <typename T>
+void placement_new_in_unique_ptr() {
+  int np_local0 = 42;
+  new to_construct<T>(np_local0);
+}
