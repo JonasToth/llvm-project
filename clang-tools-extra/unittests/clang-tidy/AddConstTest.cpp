@@ -731,6 +731,7 @@ TEST(Macro, MacroTypePointer) {
             runCheckOnCode<ValueRTransform>(Cat(S)));
 
   // FIXME: Failing even all parts seem to bail-out in for isMacroID()
+  // The macro itself is changed here and below which is not intended.
   EXPECT_NE(Cat("BAD_TYPEDEF target = nullptr;"),
             runCheckOnCode<PointeeRTransform>(Cat(S)));
   EXPECT_EQ(Cat("BAD_TYPEDEF target = nullptr;"),
