@@ -43,18 +43,20 @@ static bool locDangerous(SourceLocation S) {
 
 static Optional<SourceLocation>
 skipLParensBackwards(SourceLocation Start, const ASTContext &Context) {
-  Token T;
-  auto PreviousTokenLParen = [&]() {
+  if (locDangerous(Start))
+    return None;
+
+  auto PreviousTokenLParen = [&Start, &Context]() {
+    Token T;
     T = lexer::getPreviousToken(Start, Context.getSourceManager(),
                                 Context.getLangOpts());
     return T.is(tok::l_paren);
   };
-  while (Start.isValid() && PreviousTokenLParen()) {
-    if (locDangerous(Start))
-      return None;
+
+  while (Start.isValid() && PreviousTokenLParen())
     Start = lexer::findPreviousTokenStart(Start, Context.getSourceManager(),
                                           Context.getLangOpts());
-  }
+
   if (locDangerous(Start))
     return None;
   return Start;
@@ -73,8 +75,7 @@ static std::string buildQualifier(DeclSpec::TQ Qualifier,
                                   bool WhitespaceBefore = false) {
   if (WhitespaceBefore)
     return (llvm::Twine(' ') + DeclSpec::getSpecifierName(Qualifier)).str();
-  return (llvm::Twine(DeclSpec::getSpecifierName(Qualifier)) + " ")
-      .str();
+  return (llvm::Twine(DeclSpec::getSpecifierName(Qualifier)) + " ").str();
 }
 
 static Optional<FixItHint> changeValue(const VarDecl &Var,
