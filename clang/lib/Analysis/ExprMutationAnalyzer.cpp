@@ -304,9 +304,10 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
 const Stmt *ExprMutationAnalyzer::findMemberMutation(const Expr *Exp) {
   // Check whether any member of 'Exp' is mutated.
   const auto MemberExprs =
-      match(findAll(expr(anyOf(memberExpr(hasObjectExpression(equalsNode(Exp))),
-                               cxxDependentScopeMemberExpr(
-                                   hasObjectExpression(equalsNode(Exp)))))
+      match(findAll(expr(anyOf(memberExpr(hasObjectExpression(
+                                   ignoringImpCasts(equalsNode(Exp)))),
+                               cxxDependentScopeMemberExpr(hasObjectExpression(
+                                   ignoringImpCasts(equalsNode(Exp))))))
                         .bind(NodeID<Expr>::value)),
             Stm, Context);
   return findExprMutation(MemberExprs);
