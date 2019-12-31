@@ -569,6 +569,8 @@ struct to_construct : T {
 };
 template <typename T>
 void placement_new_in_unique_ptr() {
-  int np_local0 = 42;
+  int p_local0 = 42;
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'int' can be declared 'const'
+  int np_local0 = p_local0;
   new to_construct<T>(np_local0);
 }
