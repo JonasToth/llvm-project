@@ -1938,16 +1938,14 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
   }
   case Builtin::BI__builtin_conj:
   case Builtin::BI__builtin_conjf:
-  case Builtin::BI__builtin_conjl: {
+  case Builtin::BI__builtin_conjl:
+  case Builtin::BIconj:
+  case Builtin::BIconjf:
+  case Builtin::BIconjl: {
     ComplexPairTy ComplexVal = EmitComplexExpr(E->getArg(0));
     Value *Real = ComplexVal.first;
     Value *Imag = ComplexVal.second;
-    Value *Zero =
-      Imag->getType()->isFPOrFPVectorTy()
-        ? llvm::ConstantFP::getZeroValueForNegation(Imag->getType())
-        : llvm::Constant::getNullValue(Imag->getType());
-
-    Imag = Builder.CreateFSub(Zero, Imag, "sub");
+    Imag = Builder.CreateFNeg(Imag, "neg");
     return RValue::getComplex(std::make_pair(Real, Imag));
   }
   case Builtin::BI__builtin_creal:
