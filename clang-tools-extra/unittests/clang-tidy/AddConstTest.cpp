@@ -568,6 +568,28 @@ TEST(TagTypes, Struct) {
             runCheckOnCode<ValueRTransform>(Cat(S)));
   EXPECT_EQ(Cat("Foo const (target){0};"),
             runCheckOnCode<PointeeRTransform>(Cat(S)));
+
+  S = "struct S { int i; } target = { 0 };";
+  EXPECT_EQ("const struct S { int i; } target = { 0 };",
+            runCheckOnCode<ValueLTransform>(S));
+  EXPECT_EQ("const struct S { int i; } target = { 0 };",
+            runCheckOnCode<PointeeLTransform>(S));
+
+  EXPECT_EQ("struct S { int i; } const target = { 0 };",
+            runCheckOnCode<PointeeRTransform>(S));
+  EXPECT_EQ("struct S { int i; } const target = { 0 };",
+            runCheckOnCode<PointeeRTransform>(S));
+
+  S = "struct { int i; } target = { 0 };";
+  EXPECT_EQ("const struct { int i; } target = { 0 };",
+            runCheckOnCode<ValueLTransform>(S));
+  EXPECT_EQ("const struct { int i; } target = { 0 };",
+            runCheckOnCode<PointeeLTransform>(S));
+
+  EXPECT_EQ("struct { int i; } const target = { 0 };",
+            runCheckOnCode<PointeeRTransform>(S));
+  EXPECT_EQ("struct { int i; } const target = { 0 };",
+            runCheckOnCode<PointeeRTransform>(S));
 }
 TEST(TagTypes, Class) {
   StringRef T = "class Foo { int data; int method(); };\n";
@@ -1002,6 +1024,22 @@ TEST(Template, SpecializedTemplate) {
             runCheckOnCode<PointeeLTransform>(Cat(S)));
   EXPECT_EQ(Cat("{ TS<double> const target(42.42); }"),
             runCheckOnCode<PointeeRTransform>(Cat(S)));
+}
+
+// -----------------------------------------------------------------------------
+// ObjC Pointers
+// -----------------------------------------------------------------------------
+
+TEST(ObjC, SimplePointers) {
+  StringRef S = "int * target = 0;";
+  EXPECT_EQ(runCheckOnCode<PointeeLTransform>(S, nullptr, "input.m"),
+            "const int * target = 0;");
+  EXPECT_EQ(runCheckOnCode<PointeeRTransform>(S, nullptr, "input.m"),
+            "int  const* target = 0;");
+  EXPECT_EQ(runCheckOnCode<ValueLTransform>(S, nullptr, "input.m"),
+            "int * const target = 0;");
+  EXPECT_EQ(runCheckOnCode<ValueRTransform>(S, nullptr, "input.m"),
+            "int * const target = 0;");
 }
 
 } // namespace test

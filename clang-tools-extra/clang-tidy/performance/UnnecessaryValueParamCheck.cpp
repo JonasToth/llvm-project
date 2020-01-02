@@ -172,8 +172,8 @@ void UnnecessaryValueParamCheck::check(const MatchFinder::MatchResult &Result) {
 
 void UnnecessaryValueParamCheck::registerPPCallbacks(
     const SourceManager &SM, Preprocessor *PP, Preprocessor *ModuleExpanderPP) {
-  Inserter =
-      std::make_unique<utils::IncludeInserter>(SM, getLangOpts(), IncludeStyle);
+  Inserter = std::make_unique<utils::IncludeInserter>(SM, getLangOpts(),
+                                                      IncludeStyle);
   PP->addPPCallbacks(Inserter->CreatePPCallbacks());
 }
 
