@@ -722,13 +722,13 @@ TEST(ForEachArgumentWithParam, MatchesFunctionPtrCalls) {
   StatementMatcher CallExpr =
     callExpr(forEachArgumentWithParam(ArgumentY, IntParam));
 
-  EXPECT_TRUE(
+  EXPECT_FALSE(
     matchAndVerifyResultTrue("void f(int i, double j) {"
                              "void (*f_ptr)(int, double) = f; int y; f_ptr(y, 42.); }",
                              CallExpr,
                              std::make_unique<VerifyIdIsBoundTo<ParmVarDecl>>(
                                "param")));
-  EXPECT_TRUE(
+  EXPECT_FALSE(
     matchAndVerifyResultTrue("void f(int i) {"
                              "void (*f_ptr)(int) = f; int y; f_ptr(y); }",
                              CallExpr,
