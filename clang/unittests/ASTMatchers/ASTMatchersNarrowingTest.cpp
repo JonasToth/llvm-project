@@ -1008,6 +1008,21 @@ TEST(QualType, hasLocalQualifiers) {
                          varDecl(hasType(hasLocalQualifiers()))));
 }
 
+TEST(QualType, isFunctionPointerType) {
+  EXPECT_TRUE(matches("void f(int); void (*f_ptr)(int) = f;",
+              varDecl(hasType(isFunctionPointerType()))));
+  EXPECT_TRUE(notMatches("int *p;", varDecl(hasType(isFunctionPointerType()))));
+}
+TEST(QualType, isMemberFunctionPointerType) {
+    StringRef S = "struct A {"
+      "int f() { return 1; }"
+      "int (A::*x)(); };"
+      "void foo() { A a; a.x = &A::f; }";
+  EXPECT_FALSE(matches(S,
+              declRefExpr(ignoringImpCasts(
+                      hasType(isMemberFunctionPointerType())))));
+}
+
 TEST(IsExternC, MatchesExternCFunctionDeclarations) {
   EXPECT_TRUE(matches("extern \"C\" void f() {}", functionDecl(isExternC())));
   EXPECT_TRUE(matches("extern \"C\" { void f() {} }",

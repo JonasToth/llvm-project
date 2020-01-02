@@ -253,9 +253,9 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
   // Instantiated template functions are not handled here but in
   // findFunctionArgMutation which has additional smarts for handling forwarding
   // references.
-  const auto NonConstRefParam = forEachArgumentWithParam(
-      maybeEvalCommaExpr(ignoringImpCasts(equalsNode(Exp))),
-      parmVarDecl(hasType(nonConstReferenceType())));
+  const auto NonConstRefParam =
+      forEachArgumentWithParam(maybeEvalCommaExpr(equalsNode(Exp)),
+                               parmVarDecl(hasType(nonConstReferenceType())));
   const auto NotInstantiated = unless(hasDeclaration(isInstantiated()));
   const auto AsNonConstRefArg = anyOf(
       callExpr(NonConstRefParam, NotInstantiated),
@@ -286,7 +286,7 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
   // For returning by const-ref there will be an ImplicitCastExpr <NoOp> (for
   // adding const.)
   const auto AsNonConstRefReturn = returnStmt(
-      hasReturnValue(maybeEvalCommaExpr(ignoringImpCasts(equalsNode(Exp)))));
+      hasReturnValue(maybeEvalCommaExpr(equalsNode(Exp))));
 
   const auto Matches =
       match(findAll(stmt(anyOf(AsAssignmentLhs, AsIncDecOperand, AsNonConstThis,

@@ -715,6 +715,27 @@ TEST(ForEachArgumentWithParam, HandlesBoundNodesForNonMatches) {
     std::make_unique<VerifyIdIsBoundTo<VarDecl>>("v", 4)));
 }
 
+TEST(ForEachArgumentWithParam, MatchesFunctionPtrCalls) {
+  StatementMatcher ArgumentY =
+    declRefExpr(to(varDecl(hasName("y")))).bind("arg");
+  DeclarationMatcher IntParam = parmVarDecl(hasType(isInteger())).bind("param");
+  StatementMatcher CallExpr =
+    callExpr(forEachArgumentWithParam(ArgumentY, IntParam));
+
+  EXPECT_TRUE(
+    matchAndVerifyResultTrue("void f(int i, double j) {"
+                             "void (*f_ptr)(int, double) = f; int y; f_ptr(y, 42.); }",
+                             CallExpr,
+                             std::make_unique<VerifyIdIsBoundTo<ParmVarDecl>>(
+                               "param")));
+  EXPECT_TRUE(
+    matchAndVerifyResultTrue("void f(int i) {"
+                             "void (*f_ptr)(int) = f; int y; f_ptr(y); }",
+                             CallExpr,
+                             std::make_unique<VerifyIdIsBoundTo<DeclRefExpr>>(
+                               "arg")));
+}
+
 TEST(QualType, hasCanonicalType) {
   EXPECT_TRUE(notMatches("typedef int &int_ref;"
                            "int a;"

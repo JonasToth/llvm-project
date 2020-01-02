@@ -194,6 +194,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(cxxUnresolvedConstructExpr);
   REGISTER_MATCHER(decayedType);
   REGISTER_MATCHER(decl);
+  REGISTER_MATCHER(decompositionDecl);
   REGISTER_MATCHER(declCountIs);
   REGISTER_MATCHER(declRefExpr);
   REGISTER_MATCHER(declStmt);
@@ -369,6 +370,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(isExpr);
   REGISTER_MATCHER(isExternC);
   REGISTER_MATCHER(isFinal);
+  REGISTER_MATCHER(isFunctionPointerType);
   REGISTER_MATCHER(isImplicit);
   REGISTER_MATCHER(isInStdNamespace);
   REGISTER_MATCHER(isInTemplateInstantiation);
@@ -383,6 +385,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(isListInitialization);
   REGISTER_MATCHER(isMain);
   REGISTER_MATCHER(isMemberInitializer);
+  REGISTER_MATCHER(isMemberFunctionPointerType);
   REGISTER_MATCHER(isMoveAssignmentOperator);
   REGISTER_MATCHER(isMoveConstructor);
   REGISTER_MATCHER(isNoReturn);

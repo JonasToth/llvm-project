@@ -574,3 +574,111 @@ void placement_new_in_unique_ptr() {
   int np_local0 = p_local0;
   new to_construct<T>(np_local0);
 }
+
+// Test bit fields
+struct HardwareRegister {
+  unsigned field : 5;
+  unsigned : 7;
+  unsigned another : 20;
+};
+
+void TestRegisters() {
+  HardwareRegister np_reg0;
+  np_reg0.field = 3;
+
+  HardwareRegister p_reg1{3, 22};
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_reg1' of type 'HardwareRegister' can be declared 'const'
+  const unsigned p_val = p_reg1.another;
+}
+
+struct IntMaker {
+  operator bool() const;
+};
+IntMaker &operator>>(IntMaker &, int &);
+int TestExtractionOperator() {
+  int np_foo;
+  IntMaker np_maker;
+  if (np_maker >> np_foo) {
+    return np_foo + 2;
+  }
+  int np_bar;
+  np_maker >> np_bar;
+  return np_bar;
+}
+
+template <typename L, typename R>
+struct MyPair {
+  L left;
+  R right;
+  MyPair(const L &ll, const R &rr) : left{ll}, right{rr} {}
+};
+template <typename K, typename V>
+class MyDict {
+public:
+  static constexpr int initial_size = 16;
+  ~MyDict() {
+    if (items) {
+      delete[] items;
+    }
+  }
+
+  struct value_type {
+    K kk;
+    V vv;
+  };
+
+  using iterator = value_type *;
+  iterator begin() { return items; }
+  iterator end() { return items; }
+  iterator cbegin() const { return items; }
+  iterator cend() const { return items; }
+  void emplace(K kk, V vv) {}
+private:
+  value_type *items = nullptr;
+};
+
+MyDict<int, int> MakeDict() {
+  MyDict<int, int> np_dict;
+  np_dict.emplace(3, 4);
+  return np_dict;
+}
+
+void TestDict() {
+  auto np_dict = MakeDict();
+  for (auto &np_el : np_dict) {
+    np_el.vv += 2;
+  }
+}
+
+MyDict<double, double> MakeOtherDict() {
+  MyDict<double, double> np_dict;
+  np_dict.emplace(3., 4.);
+  return np_dict;
+}
+
+void TestZipIterators() {
+#if 0
+  const auto p_dict = MakeDict();
+  auto np_other_dict = MakeOtherDict();
+
+  // false-positive! iterators can't be const, since we're incrementing them
+  for (auto [np_left, np_right] = MyPair<MyDict<int, int>::iterator, MyDict<double, double>::iterator>{p_dict.cbegin(), np_other_dict.begin()}; np_left != p_dict.cend(); ++np_left, ++np_right) {
+    np_right->vv += np_left->vv;
+  }
+#endif
+}
+
+struct Actuator {
+  int actuations;
+};
+struct Sensor {
+  int observations;
+};
+struct System : public Actuator, public Sensor {
+};
+int SomeComputation(int arg);
+int TestInheritance() {
+  System np_sys;
+  np_sys.actuations = 5;
+  return SomeComputation(np_sys.actuations);
+}

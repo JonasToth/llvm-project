@@ -61,9 +61,11 @@ void ConstCorrectnessCheck::registerMatchers(MatchFinder *Finder) {
   // Match the function scope for which the analysis of all local variables
   // shall be run.
   const auto FunctionScope = functionDecl(hasBody(
-      compoundStmt(findAll(declStmt(containsDeclaration2(
-                                        LocalValDecl.bind("new-local-value")))
-                               .bind("decl-stmt")))
+      compoundStmt(
+          findAll(declStmt(allOf(containsDeclaration2(
+                                     LocalValDecl.bind("new-local-value")),
+                                 unless(has(decompositionDecl()))))
+                      .bind("decl-stmt")))
           .bind("scope")));
 
   Finder->addMatcher(FunctionScope, this);
