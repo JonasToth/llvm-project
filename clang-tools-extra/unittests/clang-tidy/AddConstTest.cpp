@@ -1041,6 +1041,35 @@ TEST(ObjC, SimplePointers) {
   EXPECT_EQ(runCheckOnCode<ValueRTransform>(S, nullptr, "input.m"),
             "int * const target = 0;");
 }
+TEST(ObjC, ClassPointer) {
+  StringRef T = "@class Object;";
+  StringRef S = "Object *g;";
+  auto Cat = [&](StringRef S) { return (T + S).str(); };
+
+  EXPECT_EQ(runCheckOnCode<PointeeLTransform>(Cat(S), nullptr, "input.m"),
+            Cat("const Object *target;"));
+  EXPECT_EQ(runCheckOnCode<PointeeRTransform>(Cat(S), nullptr, "input.m"),
+            Cat("Object  const*target;"));
+  EXPECT_EQ(runCheckOnCode<ValueLTransform>(Cat(S), nullptr, "input.m"),
+            Cat("Object *const target;"));
+  EXPECT_EQ(runCheckOnCode<ValueRTransform>(Cat(S), nullptr, "input.m"),
+            Cat("Object *const target;"));
+}
+TEST(ObjC, ClassPointer) {
+  StringRef TB = "@interface I";
+  StringRef S = "- (void) foo: (int *) target;";
+  StringRef TE = "@end";
+  auto Cat = [&](StringRef S) { return (TB + S + TE).str(); };
+
+  EXPECT_EQ(runCheckOnCode<PointeeLTransform>(Cat(S), nullptr, "input.m"),
+            Cat("- (void) foo: (const int *) target;"));
+  EXPECT_EQ(runCheckOnCode<PointeeRTransform>(Cat(S), nullptr, "input.m"),
+            Cat("- (void) foo: (int const*) target;"));
+  EXPECT_EQ(runCheckOnCode<ValueLTransform>(Cat(S), nullptr, "input.m"),
+            Cat("- (void) foo: (int * const) target;"));
+  EXPECT_EQ(runCheckOnCode<ValueRTransform>(Cat(S), nullptr, "input.m"),
+            Cat("- (void) foo: (int * const) target;"));
+}
 
 } // namespace test
 } // namespace tidy
