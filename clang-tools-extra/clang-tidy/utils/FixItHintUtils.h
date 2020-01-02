@@ -34,7 +34,7 @@ enum class QualifierPolicy {
 /// makes only a difference for pointer-types. Other types behave identical
 /// for either value of \c ConstTarget.
 enum class QualifierTarget {
-  Pointee, /// Transforming a pointer attaches for the pointee and not the
+  Pointee, /// Transforming a pointer attaches to the pointee and not the
            /// pointer itself. For references and normal values this option has
            /// no effect. `int * p = &i;` -> `const int * p = &i` or `int const
            /// * p = &i`.
