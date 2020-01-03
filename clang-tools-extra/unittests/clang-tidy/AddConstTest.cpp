@@ -1,4 +1,5 @@
 #include "../clang-tidy/utils/FixItHintUtils.h"
+#include "ClangTidyDiagnosticConsumer.h"
 #include "ClangTidyTest.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
@@ -1040,6 +1041,39 @@ TEST(ObjC, SimplePointers) {
             "int * const target = 0;");
   EXPECT_EQ(runCheckOnCode<ValueRTransform>(S, nullptr, "input.m"),
             "int * const target = 0;");
+}
+TEST(ObjC, ClassPointer) {
+  StringRef TB = "@class Object;\nint main() {\n";
+  StringRef S = "Object *target;";
+  StringRef TE = "\n}";
+  auto Cat = [&](StringRef S) { return (TB + S + TE).str(); };
+
+  // FIXME: Not done properly for some reason.
+  EXPECT_NE(runCheckOnCode<PointeeLTransform>(Cat(S), nullptr, "input.m"),
+            Cat("const Object *target;"));
+  EXPECT_NE(runCheckOnCode<PointeeRTransform>(Cat(S), nullptr, "input.m"),
+            Cat("Object  const*target;"));
+  EXPECT_NE(runCheckOnCode<ValueLTransform>(Cat(S), nullptr, "input.m"),
+            Cat("Object *const target;"));
+  EXPECT_NE(runCheckOnCode<ValueRTransform>(Cat(S), nullptr, "input.m"),
+            Cat("Object *const target;"));
+}
+TEST(ObjC, InterfacePointer) {
+  StringRef TB = "@interface I\n";
+  StringRef S = "- (void) foo: (int *) target;";
+  StringRef TE = "\n@end";
+  auto Cat = [&](StringRef S) { return (TB + S + TE).str(); };
+
+  EXPECT_EQ(runCheckOnCode<PointeeLTransform>(Cat(S), nullptr, "input.m"),
+            Cat("- (void) foo: (const int *) target;"));
+  EXPECT_EQ(runCheckOnCode<PointeeRTransform>(Cat(S), nullptr, "input.m"),
+            Cat("- (void) foo: (int  const*) target;"));
+  // FIXME: These transformations are incorrect. ObjC seems to need
+  // RParenSkipping which is not implemented.
+  EXPECT_NE(runCheckOnCode<ValueLTransform>(Cat(S), nullptr, "input.m"),
+            Cat("- (void) foo: (int * const) target;"));
+  EXPECT_NE(runCheckOnCode<ValueRTransform>(Cat(S), nullptr, "input.m"),
+            Cat("- (void) foo: (int * const) target;"));
 }
 
 } // namespace test
