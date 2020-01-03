@@ -52,6 +52,10 @@ bool TargetLowering::isInTailCallPosition(SelectionDAG &DAG, SDNode *Node,
                                           SDValue &Chain) const {
   const Function &F = DAG.getMachineFunction().getFunction();
 
+  // First, check if tail calls have been disabled in this function.
+  if (F.getFnAttribute("disable-tail-calls").getValueAsString() == "true")
+    return false;
+
   // Conservatively require the attributes of the call to match those of
   // the return. Ignore NoAlias and NonNull because they don't affect the
   // call sequence.
@@ -6190,8 +6194,10 @@ bool TargetLowering::expandUINT_TO_FP(SDNode *Node, SDValue &Result,
       // incoming STRICT_UINT_TO_FP node; the STRICT_FADD node can
       // never raise any exception.
       SDNodeFlags Flags;
-      Flags.setFPExcept(Node->getFlags().hasFPExcept());
+      Flags.setNoFPExcept(Node->getFlags().hasNoFPExcept());
       Fast->setFlags(Flags);
+      Flags.setNoFPExcept(true);
+      Slow->setFlags(Flags);
     } else {
       SDValue SignCvt = DAG.getNode(ISD::SINT_TO_FP, dl, DstVT, Or);
       Slow = DAG.getNode(ISD::FADD, dl, DstVT, SignCvt, SignCvt);

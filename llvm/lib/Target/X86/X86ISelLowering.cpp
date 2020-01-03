@@ -2039,6 +2039,9 @@ X86TargetLowering::X86TargetLowering(const X86TargetMachine &TM,
   setPrefFunctionAlignment(Align(16));
 
   verifyIntrinsicTables();
+
+  // Default to having -disable-strictnode-mutation on
+  IsStrictFPEnabled = true;
 }
 
 // This has so far only been implemented for 64-bit MachO.
@@ -3158,9 +3161,7 @@ static bool shouldGuaranteeTCO(CallingConv::ID CC, bool GuaranteedTailCallOpt) {
 }
 
 bool X86TargetLowering::mayBeEmittedAsTailCall(const CallInst *CI) const {
-  auto Attr =
-      CI->getParent()->getParent()->getFnAttribute("disable-tail-calls");
-  if (!CI->isTailCall() || Attr.getValueAsString() == "true")
+  if (!CI->isTailCall())
     return false;
 
   ImmutableCallSite CS(CI);
@@ -3783,7 +3784,6 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   bool IsGuaranteeTCO = MF.getTarget().Options.GuaranteedTailCallOpt ||
       CallConv == CallingConv::Tail;
   X86MachineFunctionInfo *X86Info = MF.getInfo<X86MachineFunctionInfo>();
-  auto Attr = MF.getFunction().getFnAttribute("disable-tail-calls");
   const auto *CI = dyn_cast_or_null<CallInst>(CLI.CS.getInstruction());
   const Function *Fn = CI ? CI->getCalledFunction() : nullptr;
   bool HasNCSR = (CI && CI->hasFnAttr("no_caller_saved_registers")) ||
@@ -3798,9 +3798,6 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   if (CallConv == CallingConv::X86_INTR)
     report_fatal_error("X86 interrupts may not be called directly");
-
-  if (Attr.getValueAsString() == "true")
-    isTailCall = false;
 
   if (Subtarget.isPICStyleGOT() && !IsGuaranteeTCO) {
     // If we are using a GOT, disable tail calls to external symbols with
@@ -5916,11 +5913,29 @@ static SDValue insert1BitVector(SDValue Op, SelectionDAG &DAG,
   // Widen the vector if needed.
   Vec = DAG.getNode(ISD::INSERT_SUBVECTOR, dl, WideOpVT, Undef, Vec, ZeroIdx);
 
-  // Clear the upper bits of the subvector and move it to its insert position.
   unsigned ShiftLeft = NumElems - SubVecNumElems;
+  unsigned ShiftRight = NumElems - SubVecNumElems - IdxVal;
+
+  // Do an optimization for the the most frequently used types.
+  if (WideOpVT != MVT::v64i1 || Subtarget.is64Bit()) {
+    APInt Mask0 = APInt::getBitsSet(NumElems, IdxVal, IdxVal + SubVecNumElems);
+    Mask0.flipAllBits();
+    SDValue CMask0 = DAG.getConstant(Mask0, dl, MVT::getIntegerVT(NumElems));
+    SDValue VMask0 = DAG.getNode(ISD::BITCAST, dl, WideOpVT, CMask0);
+    Vec = DAG.getNode(ISD::AND, dl, WideOpVT, Vec, VMask0);
+    SubVec = DAG.getNode(X86ISD::KSHIFTL, dl, WideOpVT, SubVec,
+                         DAG.getTargetConstant(ShiftLeft, dl, MVT::i8));
+    SubVec = DAG.getNode(X86ISD::KSHIFTR, dl, WideOpVT, SubVec,
+                         DAG.getTargetConstant(ShiftRight, dl, MVT::i8));
+    Op = DAG.getNode(ISD::OR, dl, WideOpVT, Vec, SubVec);
+
+    // Reduce to original width if needed.
+    return DAG.getNode(ISD::EXTRACT_SUBVECTOR, dl, OpVT, Op, ZeroIdx);
+  }
+
+  // Clear the upper bits of the subvector and move it to its insert position.
   SubVec = DAG.getNode(X86ISD::KSHIFTL, dl, WideOpVT, SubVec,
                        DAG.getTargetConstant(ShiftLeft, dl, MVT::i8));
-  unsigned ShiftRight = NumElems - SubVecNumElems - IdxVal;
   SubVec = DAG.getNode(X86ISD::KSHIFTR, dl, WideOpVT, SubVec,
                        DAG.getTargetConstant(ShiftRight, dl, MVT::i8));
 
@@ -18966,43 +18981,21 @@ static SDValue lowerUINT_TO_FP_v2i32(SDValue Op, SelectionDAG &DAG,
     return DAG.getNode(X86ISD::CVTUI2P, DL, MVT::v2f64, N0);
   }
 
-  // Legalize to v4i32 type.
-  N0 = DAG.getNode(ISD::CONCAT_VECTORS, DL, MVT::v4i32, N0,
-                   DAG.getUNDEF(MVT::v2i32));
+  // Zero extend to 2i64, OR with the floating point representation of 2^52.
+  // This gives us the floating point equivalent of 2^52 + the i32 integer
+  // since double has 52-bits of mantissa. Then subtract 2^52 in floating
+  // point leaving just our i32 integers in double format.
+  SDValue ZExtIn = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::v2i64, N0);
+  SDValue VBias =
+      DAG.getConstantFP(BitsToDouble(0x4330000000000000ULL), DL, MVT::v2f64);
+  SDValue Or = DAG.getNode(ISD::OR, DL, MVT::v2i64, ZExtIn,
+                           DAG.getBitcast(MVT::v2i64, VBias));
+  Or = DAG.getBitcast(MVT::v2f64, Or);
 
-  // Same implementation as VectorLegalizer::ExpandUINT_TO_FLOAT,
-  // but using v2i32 to v2f64 with X86ISD::CVTSI2P.
-  SDValue HalfWord = DAG.getConstant(16, DL, MVT::v4i32);
-  SDValue HalfWordMask = DAG.getConstant(0x0000FFFF, DL, MVT::v4i32);
-
-  // Two to the power of half-word-size.
-  SDValue TWOHW = DAG.getConstantFP((double)(1 << 16), DL, MVT::v2f64);
-
-  // Clear upper part of LO, lower HI.
-  SDValue HI = DAG.getNode(ISD::SRL, DL, MVT::v4i32, N0, HalfWord);
-  SDValue LO = DAG.getNode(ISD::AND, DL, MVT::v4i32, N0, HalfWordMask);
-
-  if (IsStrict) {
-    SDValue fHI = DAG.getNode(X86ISD::STRICT_CVTSI2P, DL,
-                              {MVT::v2f64, MVT::Other}, {Op.getOperand(0), HI});
-    fHI = DAG.getNode(ISD::STRICT_FMUL, DL, {MVT::v2f64, MVT::Other},
-                      {fHI.getValue(1), fHI, TWOHW});
-    SDValue fLO = DAG.getNode(X86ISD::STRICT_CVTSI2P, DL,
-                              {MVT::v2f64, MVT::Other}, {Op.getOperand(0), LO});
-    SDValue Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other,
-                                fHI.getValue(1), fLO.getValue(1));
-
-    // Add the two halves
-    return DAG.getNode(ISD::STRICT_FADD, DL, {MVT::v2f64, MVT::Other},
-                       {Chain, fHI, fLO});
-  }
-
-  SDValue fHI = DAG.getNode(X86ISD::CVTSI2P, DL, MVT::v2f64, HI);
-          fHI = DAG.getNode(ISD::FMUL, DL, MVT::v2f64, fHI, TWOHW);
-  SDValue fLO = DAG.getNode(X86ISD::CVTSI2P, DL, MVT::v2f64, LO);
-
-  // Add the two halves.
-  return DAG.getNode(ISD::FADD, DL, MVT::v2f64, fHI, fLO);
+  if (IsStrict)
+    return DAG.getNode(ISD::STRICT_FSUB, DL, {MVT::v2f64, MVT::Other},
+                       {Op.getOperand(0), Or, VBias});
+  return DAG.getNode(ISD::FSUB, DL, MVT::v2f64, Or, VBias);
 }
 
 static SDValue lowerUINT_TO_FP_vXi32(SDValue Op, SelectionDAG &DAG,
@@ -19062,15 +19055,6 @@ static SDValue lowerUINT_TO_FP_vXi32(SDValue Op, SelectionDAG &DAG,
   //     float4 fhi = (float4) hi - (0x1.0p39f + 0x1.0p23f);
   //     return (float4) lo + fhi;
 
-  // We shouldn't use it when unsafe-fp-math is enabled though: we might later
-  // reassociate the two FADDs, and if we do that, the algorithm fails
-  // spectacularly (PR24512).
-  // FIXME: If we ever have some kind of Machine FMF, this should be marked
-  // as non-fast and always be enabled. Why isn't SDAG FMF enough? Because
-  // there's also the MachineCombiner reassociations happening on Machine IR.
-  if (DAG.getTarget().Options.UnsafeFPMath)
-    return SDValue();
-
   bool Is128 = VecIntVT == MVT::v4i32;
   MVT VecFloatVT = Is128 ? MVT::v4f32 : MVT::v8f32;
   // If we convert to something else than the supported type, e.g., to v4f64,
@@ -19122,25 +19106,28 @@ static SDValue lowerUINT_TO_FP_vXi32(SDValue Op, SelectionDAG &DAG,
     High = DAG.getNode(ISD::OR, DL, VecIntVT, HighShift, VecCstHigh);
   }
 
-  // Create the vector constant for -(0x1.0p39f + 0x1.0p23f).
-  SDValue VecCstFAdd = DAG.getConstantFP(
-      APFloat(APFloat::IEEEsingle(), APInt(32, 0xD3000080)), DL, VecFloatVT);
+  // Create the vector constant for (0x1.0p39f + 0x1.0p23f).
+  SDValue VecCstFSub = DAG.getConstantFP(
+      APFloat(APFloat::IEEEsingle(), APInt(32, 0x53000080)), DL, VecFloatVT);
 
   //     float4 fhi = (float4) hi - (0x1.0p39f + 0x1.0p23f);
+  // NOTE: By using fsub of a positive constant instead of fadd of a negative
+  // constant, we avoid reassociation in MachineCombiner when unsafe-fp-math is
+  // enabled. See PR24512.
   SDValue HighBitcast = DAG.getBitcast(VecFloatVT, High);
   // TODO: Are there any fast-math-flags to propagate here?
   //     (float4) lo;
   SDValue LowBitcast = DAG.getBitcast(VecFloatVT, Low);
   //     return (float4) lo + fhi;
   if (IsStrict) {
-    SDValue FHigh = DAG.getNode(ISD::STRICT_FADD, DL, {VecFloatVT, MVT::Other},
-                                {Op.getOperand(0), HighBitcast, VecCstFAdd});
+    SDValue FHigh = DAG.getNode(ISD::STRICT_FSUB, DL, {VecFloatVT, MVT::Other},
+                                {Op.getOperand(0), HighBitcast, VecCstFSub});
     return DAG.getNode(ISD::STRICT_FADD, DL, {VecFloatVT, MVT::Other},
                        {FHigh.getValue(1), LowBitcast, FHigh});
   }
 
   SDValue FHigh =
-      DAG.getNode(ISD::FADD, DL, VecFloatVT, HighBitcast, VecCstFAdd);
+      DAG.getNode(ISD::FSUB, DL, VecFloatVT, HighBitcast, VecCstFSub);
   return DAG.getNode(ISD::FADD, DL, VecFloatVT, LowBitcast, FHigh);
 }
 
@@ -37602,37 +37589,55 @@ static SDValue combineVSelectToBLENDV(SDNode *N, SelectionDAG &DAG,
   if (VT.is512BitVector())
     return SDValue();
 
-  // TODO: Add other opcodes eventually lowered into BLEND.
-  for (SDNode::use_iterator UI = Cond->use_begin(), UE = Cond->use_end();
-       UI != UE; ++UI)
-    if ((UI->getOpcode() != ISD::VSELECT &&
-         UI->getOpcode() != X86ISD::BLENDV) ||
-        UI.getOperandNo() != 0)
+  auto OnlyUsedAsSelectCond = [](SDValue Cond) {
+    for (SDNode::use_iterator UI = Cond->use_begin(), UE = Cond->use_end();
+         UI != UE; ++UI)
+      if ((UI->getOpcode() != ISD::VSELECT &&
+           UI->getOpcode() != X86ISD::BLENDV) ||
+          UI.getOperandNo() != 0)
+        return false;
+
+    return true;
+  };
+
+  if (OnlyUsedAsSelectCond(Cond)) {
+    APInt DemandedMask(APInt::getSignMask(BitWidth));
+    KnownBits Known;
+    TargetLowering::TargetLoweringOpt TLO(DAG, !DCI.isBeforeLegalize(),
+                                          !DCI.isBeforeLegalizeOps());
+    if (!TLI.SimplifyDemandedBits(Cond, DemandedMask, Known, TLO, 0, true))
       return SDValue();
 
+    // If we changed the computation somewhere in the DAG, this change will
+    // affect all users of Cond. Update all the nodes so that we do not use
+    // the generic VSELECT anymore. Otherwise, we may perform wrong
+    // optimizations as we messed with the actual expectation for the vector
+    // boolean values.
+    for (SDNode *U : Cond->uses()) {
+      if (U->getOpcode() == X86ISD::BLENDV)
+        continue;
+
+      SDValue SB = DAG.getNode(X86ISD::BLENDV, SDLoc(U), U->getValueType(0),
+                               Cond, U->getOperand(1), U->getOperand(2));
+      DAG.ReplaceAllUsesOfValueWith(SDValue(U, 0), SB);
+      DCI.AddToWorklist(U);
+    }
+    DCI.CommitTargetLoweringOpt(TLO);
+    return SDValue(N, 0);
+  }
+
+  // Otherwise we can still at least try to simplify multiple use bits.
   APInt DemandedMask(APInt::getSignMask(BitWidth));
+  APInt DemandedElts(APInt::getAllOnesValue(VT.getVectorNumElements()));
   KnownBits Known;
   TargetLowering::TargetLoweringOpt TLO(DAG, !DCI.isBeforeLegalize(),
                                         !DCI.isBeforeLegalizeOps());
-  if (!TLI.SimplifyDemandedBits(Cond, DemandedMask, Known, TLO, 0, true))
-    return SDValue();
+  if (SDValue V = TLI.SimplifyMultipleUseDemandedBits(Cond, DemandedMask,
+                                                      DemandedElts, DAG, 0))
+    return DAG.getNode(X86ISD::BLENDV, SDLoc(N), N->getValueType(0),
+                       V, N->getOperand(1), N->getOperand(2));
 
-  // If we changed the computation somewhere in the DAG, this change will
-  // affect all users of Cond. Update all the nodes so that we do not use
-  // the generic VSELECT anymore. Otherwise, we may perform wrong
-  // optimizations as we messed with the actual expectation for the vector
-  // boolean values.
-  for (SDNode *U : Cond->uses()) {
-    if (U->getOpcode() == X86ISD::BLENDV)
-      continue;
-
-    SDValue SB = DAG.getNode(X86ISD::BLENDV, SDLoc(U), U->getValueType(0),
-                             Cond, U->getOperand(1), U->getOperand(2));
-    DAG.ReplaceAllUsesOfValueWith(SDValue(U, 0), SB);
-    DCI.AddToWorklist(U);
-  }
-  DCI.CommitTargetLoweringOpt(TLO);
-  return SDValue(N, 0);
+  return SDValue();
 }
 
 /// Do target-specific dag combines on SELECT and VSELECT nodes.
