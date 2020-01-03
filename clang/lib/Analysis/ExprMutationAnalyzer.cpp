@@ -254,8 +254,8 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
   // findFunctionArgMutation which has additional smarts for handling forwarding
   // references.
   const auto NonConstRefParam =
-      forEachArgumentWithParam(maybeEvalCommaExpr(equalsNode(Exp)),
-                               parmVarDecl(hasType(nonConstReferenceType())));
+      forEachArgumentWithParamType(maybeEvalCommaExpr(equalsNode(Exp)),
+                                   nonConstReferenceType());
   const auto NotInstantiated = unless(hasDeclaration(isInstantiated()));
   const auto AsNonConstRefArg = anyOf(
       callExpr(NonConstRefParam, NotInstantiated),

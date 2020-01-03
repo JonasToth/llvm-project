@@ -656,18 +656,6 @@ MyDict<double, double> MakeOtherDict() {
   return np_dict;
 }
 
-void TestZipIterators() {
-#if 0
-  const auto p_dict = MakeDict();
-  auto np_other_dict = MakeOtherDict();
-
-  // false-positive! iterators can't be const, since we're incrementing them
-  for (auto [np_left, np_right] = MyPair<MyDict<int, int>::iterator, MyDict<double, double>::iterator>{p_dict.cbegin(), np_other_dict.begin()}; np_left != p_dict.cend(); ++np_left, ++np_right) {
-    np_right->vv += np_left->vv;
-  }
-#endif
-}
-
 struct Actuator {
   int actuations;
 };
@@ -681,4 +669,24 @@ int TestInheritance() {
   System np_sys;
   np_sys.actuations = 5;
   return SomeComputation(np_sys.actuations);
+}
+
+using f_signature = int *(*)(int &);
+int *my_alloc(int &size) { return new int[size]; }
+struct A {
+  int f(int& i) { return i + 1; }
+  int (A::*x)(int&);
+};
+void f() {
+  int p_local0 = 42;
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'int' can be declared 'const'
+  int np_local0 = 42;
+  f_signature action = my_alloc;
+  action(np_local0);
+  my_alloc(np_local0);
+
+  int np_local1 = 42;
+  A a;
+  a.x = &A::f;
+  (a.*(a.x))(np_local1);
 }
