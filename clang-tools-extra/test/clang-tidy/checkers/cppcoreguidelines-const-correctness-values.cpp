@@ -633,6 +633,7 @@ public:
   iterator cbegin() const { return items; }
   iterator cend() const { return items; }
   void emplace(K kk, V vv) {}
+
 private:
   value_type *items = nullptr;
 };
@@ -664,18 +665,24 @@ struct Sensor {
 };
 struct System : public Actuator, public Sensor {
 };
-int SomeComputation(int arg);
-int TestInheritance() {
+int some_computation(int arg);
+int test_inheritance() {
   System np_sys;
   np_sys.actuations = 5;
-  return SomeComputation(np_sys.actuations);
+  return some_computation(np_sys.actuations);
+}
+struct AnotherActuator : Actuator {
+};
+Actuator &test_return_polymorphic() {
+  static AnotherActuator a;
+  return a;
 }
 
 using f_signature = int *(*)(int &);
 int *my_alloc(int &size) { return new int[size]; }
 struct A {
-  int f(int& i) { return i + 1; }
-  int (A::*x)(int&);
+  int f(int &i) { return i + 1; }
+  int (A::*x)(int &);
 };
 void f() {
   int p_local0 = 42;
@@ -689,4 +696,37 @@ void f() {
   A a;
   a.x = &A::f;
   (a.*(a.x))(np_local1);
+}
+
+struct nested_data {
+  int more_data;
+};
+struct repro_assignment_to_reference {
+  int my_data;
+  nested_data nested;
+};
+void assignment_reference() {
+  repro_assignment_to_reference np_local0{42};
+  int &np_local1 = np_local0.my_data;
+  np_local1++;
+
+  repro_assignment_to_reference np_local2;
+  int &np_local3 = np_local2.nested.more_data;
+  np_local3++;
+}
+
+struct non_const_iterator {
+  int data[42];
+
+  int *begin() { return &data[0]; }
+  int *end() { return &data[41]; }
+};
+
+void for_bad_iterators() {
+  non_const_iterator np_local0;
+  non_const_iterator &np_local1 = np_local0;
+
+  for (int el : np_local1) {
+    (void)el;
+  }
 }
