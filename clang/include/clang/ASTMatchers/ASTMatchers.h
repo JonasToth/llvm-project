@@ -1983,6 +1983,18 @@ AST_MATCHER_P(CXXForRangeStmt, hasRangeInit, internal::Matcher<Expr>,
   return (Init != nullptr && InnerMatcher.matches(*Init, Finder, Builder));
 }
 
+/// Matches the implicit DeclStmt for the begin iterator.
+AST_MATCHER_P(CXXForRangeStmt, hasBeginDeclStmt,
+              ast_matchers::internal::Matcher<DeclStmt>, InnerMatcher) {
+  return InnerMatcher.matches(*Node.getBeginStmt(), Finder, Builder);
+}
+
+/// Matches the implicit DeclStmt for the end iterator.
+AST_MATCHER_P(CXXForRangeStmt, hasEndDeclStmt,
+              ast_matchers::internal::Matcher<DeclStmt>, InnerMatcher) {
+  return InnerMatcher.matches(*Node.getEndStmt(), Finder, Builder);
+}
+
 /// Matches while statements.
 ///
 /// Given

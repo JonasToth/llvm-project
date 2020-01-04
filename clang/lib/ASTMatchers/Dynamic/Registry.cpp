@@ -252,6 +252,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(hasAttr);
   REGISTER_MATCHER(hasAutomaticStorageDuration);
   REGISTER_MATCHER(hasBase);
+  REGISTER_MATCHER(hasBeginDeclStmt);
   REGISTER_MATCHER(hasBitWidth);
   REGISTER_MATCHER(hasBody);
   REGISTER_MATCHER(hasCanonicalType);
@@ -269,6 +270,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(hasDestinationType);
   REGISTER_MATCHER(hasDynamicExceptionSpec);
   REGISTER_MATCHER(hasEitherOperand);
+  REGISTER_MATCHER(hasEndDeclStmt);
   REGISTER_MATCHER(hasElementType);
   REGISTER_MATCHER(hasElse);
   REGISTER_MATCHER(hasExplicitSpecifier);

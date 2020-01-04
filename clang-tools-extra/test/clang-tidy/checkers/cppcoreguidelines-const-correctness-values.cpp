@@ -674,8 +674,8 @@ int test_inheritance() {
 struct AnotherActuator : Actuator {
 };
 Actuator &test_return_polymorphic() {
-  static AnotherActuator a;
-  return a;
+  static AnotherActuator np_local0;
+  return np_local0;
 }
 
 using f_signature = int *(*)(int &);
@@ -722,11 +722,54 @@ struct non_const_iterator {
   int *end() { return &data[41]; }
 };
 
+// The problem is, that 'begin()' and 'end()' are not const overloaded, so
+// they are always a mutation. If 'np_local1' is fixed to const it results in
+// a compilation error.
 void for_bad_iterators() {
   non_const_iterator np_local0;
   non_const_iterator &np_local1 = np_local0;
 
-  for (int el : np_local1) {
-    (void)el;
+  for (int np_local2 : np_local1) {
+    np_local2++;
+  }
+}
+
+struct good_iterator {
+  int data[42];
+
+  int *begin() { return &data[0]; }
+  int *end() { return &data[41]; }
+  const int *begin() const { return &data[0]; }
+  const int *end() const { return &data[41]; }
+};
+
+void good_iterators() {
+  good_iterator np_local0;
+  // FIXME: In theory could be marked const, but is not visible from the AST.
+  good_iterator &p_local0 = np_local0;
+  // CHECK MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'good_iterator &' can be declared 'const'
+
+  for (int p_local1 : p_local0) {
+    // CHECK-MESSAGES: [[@LINE-1]]:8: warning: variable 'p_local1' of type 'int' can be declared 'const'
+    (void)p_local1;
+  }
+}
+
+void for_bad_iterators_array() {
+  int np_local0[42];
+  int(&np_local1)[42] = np_local0;
+
+  for (int &np_local2 : np_local1) {
+    np_local2++;
+  }
+}
+void for_ok_iterators_array() {
+  int np_local0[42];
+  int(&p_local0)[42] = np_local0;
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'int (&)[42]' can be declared 'const'
+
+  for (int p_local1 : p_local0) {
+    // CHECK-MESSAGES: [[@LINE-1]]:8: warning: variable 'p_local1' of type 'int' can be declared 'const'
+    (void)p_local1;
   }
 }

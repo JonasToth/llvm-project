@@ -284,8 +284,15 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
   // For returning by value there will be an ImplicitCastExpr <LValueToRValue>.
   // For returning by const-ref there will be an ImplicitCastExpr <NoOp> (for
   // adding const.)
-  const auto AsNonConstRefReturn =
-      returnStmt(hasReturnValue(maybeEvalCommaExpr(equalsNode(Exp))));
+  const auto AsNonConstRefReturn = returnStmt(hasReturnValue(
+      anyOf(maybeEvalCommaExpr(equalsNode(Exp)),
+            castExpr(allOf(
+                hasCastKind(CK_DerivedToBase),
+                hasSourceExpression(maybeEvalCommaExpr(equalsNode(Exp))))))));
+
+  // It is used as a non-const-reference for initalizing a range-for loop.
+  const auto AsNonConstRefRangeInit = cxxForRangeStmt(hasRangeInit(
+      declRefExpr(allOf(equalsNode(Exp), hasType(nonConstReferenceType())))));
 
   const auto Matches =
       match(findAll(stmt(anyOf(AsAssignmentLhs, AsIncDecOperand, AsNonConstThis,
@@ -341,6 +348,54 @@ const Stmt *ExprMutationAnalyzer::findCastMutation(const Expr *Exp) {
 }
 
 const Stmt *ExprMutationAnalyzer::findRangeLoopMutation(const Expr *Exp) {
+  // Keep the ordering for the specific initialization matches to happen first,
+  // because it is cheaper to match then all potential modifications of the
+  // loop variable.
+  const auto RefToArrayRefToElements = match(
+      findAll(
+          stmt(cxxForRangeStmt(
+                   hasLoopVariable(varDecl(hasType(nonConstReferenceType()))
+                                       .bind(NodeID<Decl>::value)),
+                   hasRangeInit(allOf(
+                       equalsNode(Exp),
+                       declRefExpr(hasDeclaration(valueDecl(
+                           hasType(nonConstReferenceType()),
+                           hasType(hasUnqualifiedDesugaredType(referenceType(
+                               pointee(hasUnqualifiedDesugaredType(
+                                   arrayType()))))))))))))
+              .bind("stmt")),
+      Stm, Context);
+  const auto *BadRangeInitFromArray =
+      selectFirst<Stmt>("stmt", RefToArrayRefToElements);
+
+  if (BadRangeInitFromArray != nullptr)
+    return BadRangeInitFromArray;
+
+  // FIXME: This filters more variables then necessary, but removes the false
+  // positive for references to containers, where the container does not 
+  // provide const-overloads for 'begin()' and 'end()'.
+  // If such an overload exists and the LoopVar (see below) is not modified,
+  // the reference to the container could be marked as const.
+  const auto NonConstMethod = cxxMethodDecl(unless(isConst()));
+  const auto NonConstMethodCall = cxxMemberCallExpr(callee(NonConstMethod));
+  const auto RefToContainerBadIterators = match(
+      findAll(
+          stmt(cxxForRangeStmt(
+                   hasRangeInit(allOf(equalsNode(Exp),
+                                      declRefExpr(hasDeclaration(valueDecl(
+                                          hasType(nonConstReferenceType())))))),
+                   hasBeginDeclStmt(hasSingleDecl(
+                       varDecl(hasInitializer(NonConstMethodCall)))),
+                   hasEndDeclStmt(hasSingleDecl(
+                       varDecl(hasInitializer(NonConstMethodCall))))))
+              .bind("stmt")),
+      Stm, Context);
+  const auto *BadIteratorsContainer =
+      selectFirst<Stmt>("stmt", RefToContainerBadIterators);
+  if (BadIteratorsContainer != nullptr) {
+    return BadIteratorsContainer;
+  }
+
   // If range for looping over 'Exp' with a non-const reference loop variable,
   // check all declRefExpr of the loop variable.
   const auto LoopVars =
@@ -375,9 +430,9 @@ const Stmt *ExprMutationAnalyzer::findReferenceMutation(const Expr *Exp) {
                             equalsNode(Exp),
                             conditionalOperator(
                                 anyOf(hasTrueExpression(equalsNode(Exp)),
-                                      hasFalseExpression(equalsNode(Exp))),
-                                memberExpr(hasObjectExpression(
-                                    ignoringImpCasts(equalsNode(Exp))))))),
+                                      hasFalseExpression(equalsNode(Exp)))),
+                            memberExpr(hasObjectExpression(
+                                ignoringParenImpCasts(equalsNode(Exp)))))),
                         hasParent(declStmt().bind("stmt")),
                         // Don't follow the reference in range statement, we've
                         // handled that separately.
