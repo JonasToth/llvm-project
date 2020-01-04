@@ -732,6 +732,10 @@ void for_bad_iterators() {
   for (int np_local2 : np_local1) {
     np_local2++;
   }
+
+  non_const_iterator p_local0;
+  for (int p_local1 : p_local0)
+    ;
 }
 
 struct good_iterator {
@@ -753,6 +757,10 @@ void good_iterators() {
     // CHECK-MESSAGES: [[@LINE-1]]:8: warning: variable 'p_local1' of type 'int' can be declared 'const'
     (void)p_local1;
   }
+
+  good_iterator p_local2;
+  for (int p_local3 : p_local2)
+    ;
 }
 
 void for_bad_iterators_array() {
