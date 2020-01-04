@@ -227,8 +227,10 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
   // A member function is assumed to be non-const when it is unresolved.
   const auto NonConstMethod = cxxMethodDecl(unless(isConst()));
   const auto AsNonConstThis = expr(anyOf(
-      cxxMemberCallExpr(callee(NonConstMethod),
-                        on(canResolveToExpr(equalsNode(Exp)))),
+      cxxMemberCallExpr(
+          callee(NonConstMethod),
+          // E.g. casts from sub class to base class.
+          on(ignoringImpCasts(canResolveToExpr(equalsNode(Exp))))),
       cxxOperatorCallExpr(callee(NonConstMethod),
                           hasArgument(0, canResolveToExpr(equalsNode(Exp)))),
       callExpr(
