@@ -733,34 +733,62 @@ void for_bad_iterators() {
     np_local2++;
   }
 
-  non_const_iterator p_local0;
-  for (int p_local1 : p_local0)
+  non_const_iterator np_local3;
+  for (int p_local0 : np_local3)
+    // CHECK-MESSAGES: [[@LINE-1]]:8: warning: variable 'p_local0' of type 'int' can be declared 'const'
     ;
+
+  // Horrible code constructs...
+  {
+    non_const_iterator np_local4;
+    np_local4.data[0]++;
+    non_const_iterator np_local5;
+    for (int p_local1 : np_local4, np_local5)
+      // CHECK-MESSAGES: [[@LINE-1]]:10: warning: variable 'p_local1' of type 'int' can be declared 'const'
+      ;
+
+    non_const_iterator np_local6;
+    non_const_iterator np_local7;
+    for (int p_local2 : 1 > 2 ? np_local6 : np_local7)
+      // CHECK-MESSAGES: [[@LINE-1]]:10: warning: variable 'p_local2' of type 'int' can be declared 'const'
+      ;
+
+    non_const_iterator np_local8;
+    non_const_iterator np_local9;
+    for (int p_local3 : 2 > 1 ? np_local8 : (np_local8, np_local9))
+      // CHECK-MESSAGES: [[@LINE-1]]:10: warning: variable 'p_local3' of type 'int' can be declared 'const'
+      ;
+  }
 }
 
 struct good_iterator {
-  int data[42];
+  int data[3] = {1, 2, 3};
 
   int *begin() { return &data[0]; }
-  int *end() { return &data[41]; }
+  int *end() { return &data[2]; }
   const int *begin() const { return &data[0]; }
-  const int *end() const { return &data[41]; }
+  const int *end() const { return &data[2]; }
 };
 
 void good_iterators() {
-  good_iterator np_local0;
-  // FIXME: In theory could be marked const, but is not visible from the AST.
-  good_iterator &p_local0 = np_local0;
-  // CHECK MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'good_iterator &' can be declared 'const'
+  good_iterator p_local0;
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'good_iterator' can be declared 'const'
+  good_iterator &p_local1 = p_local0;
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local1' of type 'good_iterator &' can be declared 'const'
 
-  for (int p_local1 : p_local0) {
-    // CHECK-MESSAGES: [[@LINE-1]]:8: warning: variable 'p_local1' of type 'int' can be declared 'const'
-    (void)p_local1;
+  for (int p_local2 : p_local1) {
+    // CHECK-MESSAGES: [[@LINE-1]]:8: warning: variable 'p_local2' of type 'int' can be declared 'const'
+    (void)p_local2;
   }
 
-  good_iterator p_local2;
-  for (int p_local3 : p_local2)
+  good_iterator p_local3;
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local3' of type 'good_iterator' can be declared 'const'
+  for (int p_local4 : p_local3)
+    // CHECK-MESSAGES: [[@LINE-1]]:8: warning: variable 'p_local4' of type 'int' can be declared 'const'
     ;
+  good_iterator np_local1;
+  for (int &np_local2 : np_local1)
+    np_local2++;
 }
 
 void for_bad_iterators_array() {
@@ -780,4 +808,19 @@ void for_ok_iterators_array() {
     // CHECK-MESSAGES: [[@LINE-1]]:8: warning: variable 'p_local1' of type 'int' can be declared 'const'
     (void)p_local1;
   }
+}
+
+void take_ref(int &);
+void ternary_reference() {
+  int np_local0 = 42;
+  int np_local1 = 43;
+  take_ref((np_local0 > np_local1 ? np_local0 : (np_local0, np_local1)));
+}
+
+void complex_usage() {
+  int np_local0 = 42;
+  int p_local0 = 42;
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'int' can be declared 'const'
+  int np_local1 = 42;
+  (np_local0 == p_local0 ? np_local0 : (p_local0, np_local1))++;
 }

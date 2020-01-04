@@ -36,6 +36,17 @@ AST_MATCHER_P(Expr, maybeEvalCommaExpr, ast_matchers::internal::Matcher<Expr>,
   return InnerMatcher.matches(*Result, Finder, Builder);
 }
 
+AST_MATCHER_P(Expr, canResolveToExpr, ast_matchers::internal::Matcher<Expr>,
+              InnerMatcher) {
+  auto ComplexMatcher = expr(anyOf(
+      maybeEvalCommaExpr(InnerMatcher),
+      conditionalOperator(anyOf(
+          hasTrueExpression(ignoringParens(maybeEvalCommaExpr(InnerMatcher))),
+          hasFalseExpression(
+              ignoringParens(maybeEvalCommaExpr(InnerMatcher)))))));
+  return ComplexMatcher.matches(Node, Finder, Builder);
+}
+
 const ast_matchers::internal::VariadicDynCastAllOfMatcher<Stmt, CXXTypeidExpr>
     cxxTypeidExpr;
 
@@ -154,7 +165,7 @@ bool ExprMutationAnalyzer::isUnevaluated(const Expr *Exp) {
              NodeID<Expr>::value,
              match(
                  findAll(
-                     expr(equalsNode(Exp),
+                     expr(canResolveToExpr(equalsNode(Exp)),
                           anyOf(
                               // `Exp` is part of the underlying expression of
                               // decltype/typeof if it has an ancestor of
@@ -205,26 +216,26 @@ const Stmt *ExprMutationAnalyzer::findDeclPointeeMutation(
 const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
   // LHS of any assignment operators.
   const auto AsAssignmentLhs = binaryOperator(
-      isAssignmentOperator(), hasLHS(maybeEvalCommaExpr(equalsNode(Exp))));
+      isAssignmentOperator(), hasLHS(canResolveToExpr(equalsNode(Exp))));
 
   // Operand of increment/decrement operators.
   const auto AsIncDecOperand =
       unaryOperator(anyOf(hasOperatorName("++"), hasOperatorName("--")),
-                    hasUnaryOperand(maybeEvalCommaExpr(equalsNode(Exp))));
+                    hasUnaryOperand(canResolveToExpr(equalsNode(Exp))));
 
   // Invoking non-const member function.
   // A member function is assumed to be non-const when it is unresolved.
   const auto NonConstMethod = cxxMethodDecl(unless(isConst()));
   const auto AsNonConstThis = expr(anyOf(
       cxxMemberCallExpr(callee(NonConstMethod),
-                        on(maybeEvalCommaExpr(equalsNode(Exp)))),
+                        on(canResolveToExpr(equalsNode(Exp)))),
       cxxOperatorCallExpr(callee(NonConstMethod),
-                          hasArgument(0, maybeEvalCommaExpr(equalsNode(Exp)))),
+                          hasArgument(0, canResolveToExpr(equalsNode(Exp)))),
       callExpr(
           callee(expr(anyOf(unresolvedMemberExpr(hasObjectExpression(
-                                maybeEvalCommaExpr(equalsNode(Exp)))),
+                                canResolveToExpr(equalsNode(Exp)))),
                             cxxDependentScopeMemberExpr(hasObjectExpression(
-                                maybeEvalCommaExpr(equalsNode(Exp))))))))));
+                                canResolveToExpr(equalsNode(Exp))))))))));
 
   // Taking address of 'Exp'.
   // We're assuming 'Exp' is mutated as soon as its address is taken, though in
@@ -234,11 +245,11 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
       unaryOperator(hasOperatorName("&"),
                     // A NoOp implicit cast is adding const.
                     unless(hasParent(implicitCastExpr(hasCastKind(CK_NoOp)))),
-                    hasUnaryOperand(maybeEvalCommaExpr(equalsNode(Exp))));
+                    hasUnaryOperand(canResolveToExpr(equalsNode(Exp))));
   const auto AsPointerFromArrayDecay =
       castExpr(hasCastKind(CK_ArrayToPointerDecay),
                unless(hasParent(arraySubscriptExpr())),
-               has(maybeEvalCommaExpr(equalsNode(Exp))));
+               has(canResolveToExpr(equalsNode(Exp))));
   // Treat calling `operator->()` of move-only classes as taking address.
   // These are typically smart pointers with unique ownership so we treat
   // mutation of pointee as mutation of the smart pointer itself.
@@ -246,7 +257,7 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
       hasOverloadedOperatorName("->"),
       callee(
           cxxMethodDecl(ofClass(isMoveOnly()), returns(nonConstPointerType()))),
-      argumentCountIs(1), hasArgument(0, maybeEvalCommaExpr(equalsNode(Exp))));
+      argumentCountIs(1), hasArgument(0, canResolveToExpr(equalsNode(Exp))));
 
   // Used as non-const-ref argument when calling a function.
   // An argument is assumed to be non-const-ref when the function is unresolved.
@@ -254,7 +265,7 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
   // findFunctionArgMutation which has additional smarts for handling forwarding
   // references.
   const auto NonConstRefParam = forEachArgumentWithParamType(
-      maybeEvalCommaExpr(equalsNode(Exp)), nonConstReferenceType());
+      canResolveToExpr(equalsNode(Exp)), nonConstReferenceType());
   const auto NotInstantiated = unless(hasDeclaration(isInstantiated()));
   const auto AsNonConstRefArg = anyOf(
       callExpr(NonConstRefParam, NotInstantiated),
@@ -262,9 +273,9 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
       callExpr(callee(expr(anyOf(unresolvedLookupExpr(), unresolvedMemberExpr(),
                                  cxxDependentScopeMemberExpr(),
                                  hasType(templateTypeParmType())))),
-               hasAnyArgument(maybeEvalCommaExpr(equalsNode(Exp)))),
+               hasAnyArgument(canResolveToExpr(equalsNode(Exp)))),
       cxxUnresolvedConstructExpr(
-          hasAnyArgument(maybeEvalCommaExpr(equalsNode(Exp)))),
+          hasAnyArgument(canResolveToExpr(equalsNode(Exp)))),
       // Previous False Positive in the following Code:
       // `template <typename T> void f() { int i = 42; new Type<T>(i); }`
       // Where the constructor of `Type` takes its argument as reference.
@@ -285,14 +296,15 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
   // For returning by const-ref there will be an ImplicitCastExpr <NoOp> (for
   // adding const.)
   const auto AsNonConstRefReturn = returnStmt(hasReturnValue(
-      anyOf(maybeEvalCommaExpr(equalsNode(Exp)),
+      anyOf(canResolveToExpr(equalsNode(Exp)),
             castExpr(allOf(
                 hasCastKind(CK_DerivedToBase),
-                hasSourceExpression(maybeEvalCommaExpr(equalsNode(Exp))))))));
+                hasSourceExpression(canResolveToExpr(equalsNode(Exp))))))));
 
   // It is used as a non-const-reference for initalizing a range-for loop.
-  const auto AsNonConstRefRangeInit = cxxForRangeStmt(hasRangeInit(
-      declRefExpr(allOf(equalsNode(Exp), hasType(nonConstReferenceType())))));
+  const auto AsNonConstRefRangeInit = cxxForRangeStmt(
+      hasRangeInit(declRefExpr(allOf(canResolveToExpr(equalsNode(Exp)),
+                                     hasType(nonConstReferenceType())))));
 
   const auto Matches =
       match(findAll(stmt(anyOf(AsAssignmentLhs, AsIncDecOperand, AsNonConstThis,
@@ -306,20 +318,22 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
 
 const Stmt *ExprMutationAnalyzer::findMemberMutation(const Expr *Exp) {
   // Check whether any member of 'Exp' is mutated.
-  const auto MemberExprs =
-      match(findAll(expr(anyOf(memberExpr(hasObjectExpression(
-                                   ignoringImpCasts(equalsNode(Exp)))),
-                               cxxDependentScopeMemberExpr(hasObjectExpression(
-                                   ignoringImpCasts(equalsNode(Exp))))))
-                        .bind(NodeID<Expr>::value)),
-            Stm, Context);
+  const auto MemberExprs = match(
+      findAll(
+          expr(anyOf(memberExpr(hasObjectExpression(
+                         ignoringImpCasts(canResolveToExpr(equalsNode(Exp))))),
+                     cxxDependentScopeMemberExpr(hasObjectExpression(
+                         ignoringImpCasts(canResolveToExpr(equalsNode(Exp)))))))
+              .bind(NodeID<Expr>::value)),
+      Stm, Context);
   return findExprMutation(MemberExprs);
 }
 
 const Stmt *ExprMutationAnalyzer::findArrayElementMutation(const Expr *Exp) {
   // Check whether any element of an array is mutated.
   const auto SubscriptExprs = match(
-      findAll(arraySubscriptExpr(hasBase(ignoringImpCasts(equalsNode(Exp))))
+      findAll(arraySubscriptExpr(
+                  hasBase(ignoringImpCasts(canResolveToExpr(equalsNode(Exp)))))
                   .bind(NodeID<Expr>::value)),
       Stm, Context);
   return findExprMutation(SubscriptExprs);
@@ -327,21 +341,21 @@ const Stmt *ExprMutationAnalyzer::findArrayElementMutation(const Expr *Exp) {
 
 const Stmt *ExprMutationAnalyzer::findCastMutation(const Expr *Exp) {
   // If 'Exp' is casted to any non-const reference type, check the castExpr.
-  const auto Casts =
-      match(findAll(castExpr(hasSourceExpression(equalsNode(Exp)),
-                             anyOf(explicitCastExpr(hasDestinationType(
-                                       nonConstReferenceType())),
-                                   implicitCastExpr(hasImplicitDestinationType(
-                                       nonConstReferenceType()))))
-                        .bind(NodeID<Expr>::value)),
-            Stm, Context);
+  const auto Casts = match(
+      findAll(castExpr(hasSourceExpression(canResolveToExpr(equalsNode(Exp))),
+                       anyOf(explicitCastExpr(
+                                 hasDestinationType(nonConstReferenceType())),
+                             implicitCastExpr(hasImplicitDestinationType(
+                                 nonConstReferenceType()))))
+                  .bind(NodeID<Expr>::value)),
+      Stm, Context);
   if (const Stmt *S = findExprMutation(Casts))
     return S;
   // Treat std::{move,forward} as cast.
   const auto Calls =
       match(findAll(callExpr(callee(namedDecl(
                                  hasAnyName("::std::move", "::std::forward"))),
-                             hasArgument(0, equalsNode(Exp)))
+                             hasArgument(0, canResolveToExpr(equalsNode(Exp))))
                         .bind("expr")),
             Stm, Context);
   return findExprMutation(Calls);
@@ -351,19 +365,18 @@ const Stmt *ExprMutationAnalyzer::findRangeLoopMutation(const Expr *Exp) {
   // Keep the ordering for the specific initialization matches to happen first,
   // because it is cheaper to match then all potential modifications of the
   // loop variable.
+
+  // The range variable is a reference to a builtin array. In that case the
+  // array is considered modified if the loop-variable is a non-const reference.
+  const auto DeclStmtToNonRefToArray = declStmt(hasSingleDecl(varDecl(hasType(
+      hasUnqualifiedDesugaredType(referenceType(pointee(arrayType())))))));
   const auto RefToArrayRefToElements = match(
-      findAll(
-          stmt(cxxForRangeStmt(
-                   hasLoopVariable(varDecl(hasType(nonConstReferenceType()))
-                                       .bind(NodeID<Decl>::value)),
-                   hasRangeInit(allOf(
-                       equalsNode(Exp),
-                       declRefExpr(hasDeclaration(valueDecl(
-                           hasType(nonConstReferenceType()),
-                           hasType(hasUnqualifiedDesugaredType(referenceType(
-                               pointee(hasUnqualifiedDesugaredType(
-                                   arrayType()))))))))))))
-              .bind("stmt")),
+      findAll(stmt(cxxForRangeStmt(
+                       hasLoopVariable(varDecl(hasType(nonConstReferenceType()))
+                                           .bind(NodeID<Decl>::value)),
+                       hasRangeStmt(DeclStmtToNonRefToArray),
+                       hasRangeInit(canResolveToExpr(equalsNode(Exp)))))
+                  .bind("stmt")),
       Stm, Context);
   const auto *BadRangeInitFromArray =
       selectFirst<Stmt>("stmt", RefToArrayRefToElements);
@@ -371,28 +384,31 @@ const Stmt *ExprMutationAnalyzer::findRangeLoopMutation(const Expr *Exp) {
   if (BadRangeInitFromArray != nullptr)
     return BadRangeInitFromArray;
 
-  // FIXME: This filters more variables then necessary, but removes the false
-  // positive for references to containers, where the container does not 
-  // provide const-overloads for 'begin()' and 'end()'.
-  // If such an overload exists and the LoopVar (see below) is not modified,
-  // the reference to the container could be marked as const.
-  const auto NonConstMethod = cxxMethodDecl(unless(isConst()));
-  const auto NonConstMethodCall = cxxMemberCallExpr(callee(NonConstMethod));
-  const auto RefToContainerBadIterators = match(
-      findAll(
-          stmt(cxxForRangeStmt(
-                   hasRangeInit(allOf(equalsNode(Exp),
-                                      declRefExpr(hasDeclaration(valueDecl(
-                                          hasType(nonConstReferenceType())))))),
-                   hasBeginDeclStmt(hasSingleDecl(
-                       varDecl(hasInitializer(NonConstMethodCall)))),
-                   hasEndDeclStmt(hasSingleDecl(
-                       varDecl(hasInitializer(NonConstMethodCall))))))
-              .bind("stmt")),
-      Stm, Context);
+  // It is possible, that containers do not provide a const-overload for their
+  // iterator accessors. If this is the case, the variable is used non-const
+  // no matter what happens in the loop. This requires special detection as it
+  // is faster to find then all mutations of the loop variable.
+  // It aims at a different modification as well.
+  const auto HasAnyNonConstIterator =
+      anyOf(allOf(hasMethod(allOf(hasName("begin"), unless(isConst()))),
+                  unless(hasMethod(allOf(hasName("begin"), isConst())))),
+            allOf(hasMethod(allOf(hasName("end"), unless(isConst()))),
+                  unless(hasMethod(allOf(hasName("end"), isConst())))));
+
+  const auto DeclStmtToNonConstIteratorContainer = declStmt(
+      hasSingleDecl(varDecl(hasType(hasUnqualifiedDesugaredType(referenceType(
+          pointee(hasDeclaration(cxxRecordDecl(HasAnyNonConstIterator)))))))));
+
+  const auto RefToContainerBadIterators =
+      match(findAll(stmt(cxxForRangeStmt(allOf(
+                             hasRangeStmt(DeclStmtToNonConstIteratorContainer),
+                             hasRangeInit(canResolveToExpr(equalsNode(Exp))))))
+                        .bind("stmt")),
+            Stm, Context);
   const auto *BadIteratorsContainer =
       selectFirst<Stmt>("stmt", RefToContainerBadIterators);
   if (BadIteratorsContainer != nullptr) {
+    llvm::dbgs() << "Matched this For\n";
     return BadIteratorsContainer;
   }
 
@@ -402,7 +418,7 @@ const Stmt *ExprMutationAnalyzer::findRangeLoopMutation(const Expr *Exp) {
       match(findAll(cxxForRangeStmt(
                 hasLoopVariable(varDecl(hasType(nonConstReferenceType()))
                                     .bind(NodeID<Decl>::value)),
-                hasRangeInit(equalsNode(Exp)))),
+                hasRangeInit(canResolveToExpr(equalsNode(Exp))))),
             Stm, Context);
   return findDeclMutation(LoopVars);
 }
@@ -416,36 +432,38 @@ const Stmt *ExprMutationAnalyzer::findReferenceMutation(const Expr *Exp) {
                         hasOverloadedOperatorName("*"),
                         callee(cxxMethodDecl(ofClass(isMoveOnly()),
                                              returns(nonConstReferenceType()))),
-                        argumentCountIs(1), hasArgument(0, equalsNode(Exp)))
+                        argumentCountIs(1),
+                        hasArgument(0, canResolveToExpr(equalsNode(Exp))))
                         .bind(NodeID<Expr>::value)),
             Stm, Context);
   if (const Stmt *S = findExprMutation(Ref))
     return S;
 
   // If 'Exp' is bound to a non-const reference, check all declRefExpr to that.
-  const auto Refs =
-      match(stmt(forEachDescendant(
-                varDecl(hasType(nonConstReferenceType()),
-                        hasInitializer(anyOf(
-                            equalsNode(Exp),
-                            conditionalOperator(
-                                anyOf(hasTrueExpression(equalsNode(Exp)),
-                                      hasFalseExpression(equalsNode(Exp)))),
-                            memberExpr(hasObjectExpression(
-                                ignoringParenImpCasts(equalsNode(Exp)))))),
-                        hasParent(declStmt().bind("stmt")),
-                        // Don't follow the reference in range statement, we've
-                        // handled that separately.
-                        unless(hasParent(declStmt(hasParent(cxxForRangeStmt(
-                            hasRangeStmt(equalsBoundNode("stmt"))))))))
-                    .bind(NodeID<Decl>::value))),
-            Stm, Context);
+  const auto Refs = match(
+      stmt(forEachDescendant(
+          varDecl(
+              hasType(nonConstReferenceType()),
+              hasInitializer(anyOf(
+                  canResolveToExpr(equalsNode(Exp)),
+                  conditionalOperator(anyOf(
+                      hasTrueExpression(canResolveToExpr(equalsNode(Exp))),
+                      hasFalseExpression(canResolveToExpr(equalsNode(Exp))))),
+                  memberExpr(hasObjectExpression(ignoringParenImpCasts(
+                      canResolveToExpr(equalsNode(Exp))))))),
+              hasParent(declStmt().bind("stmt")),
+              // Don't follow the reference in range statement, we've
+              // handled that separately.
+              unless(hasParent(declStmt(hasParent(
+                  cxxForRangeStmt(hasRangeStmt(equalsBoundNode("stmt"))))))))
+              .bind(NodeID<Decl>::value))),
+      Stm, Context);
   return findDeclMutation(Refs);
 }
 
 const Stmt *ExprMutationAnalyzer::findFunctionArgMutation(const Expr *Exp) {
   const auto NonConstRefParam = forEachArgumentWithParam(
-      equalsNode(Exp),
+      canResolveToExpr(equalsNode(Exp)),
       parmVarDecl(hasType(nonConstReferenceType())).bind("parm"));
   const auto IsInstantiated = hasDeclaration(isInstantiated());
   const auto FuncDecl = hasDeclaration(functionDecl().bind("func"));
