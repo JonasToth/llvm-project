@@ -824,3 +824,24 @@ void complex_usage() {
   int np_local1 = 42;
   (np_local0 == p_local0 ? np_local0 : (p_local0, np_local1))++;
 }
+
+template <typename T>
+struct SmallVectorBase {
+  T data[4];
+  void push_back(const T &el) {}
+  int size() const { return 4; }
+};
+
+template <typename T>
+struct SmallVector : SmallVectorBase<T> {};
+
+template <class T>
+void EmitProtocolMethodList(T &&Methods) {
+  SmallVector<const int *> p_local0;
+  SmallVector<const int *> np_local0;
+  for (const auto *I : Methods) {
+    if (I->isOptional())
+      np_local0.push_back(I);
+  }
+  p_local0.size();
+}

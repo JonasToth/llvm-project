@@ -38,12 +38,12 @@ AST_MATCHER_P(Expr, maybeEvalCommaExpr, ast_matchers::internal::Matcher<Expr>,
 
 AST_MATCHER_P(Expr, canResolveToExpr, ast_matchers::internal::Matcher<Expr>,
               InnerMatcher) {
-  auto ComplexMatcher = expr(anyOf(
+  auto ComplexMatcher = ignoringParens(expr(anyOf(
       maybeEvalCommaExpr(InnerMatcher),
       conditionalOperator(anyOf(
           hasTrueExpression(ignoringParens(maybeEvalCommaExpr(InnerMatcher))),
           hasFalseExpression(
-              ignoringParens(maybeEvalCommaExpr(InnerMatcher)))))));
+              ignoringParens(maybeEvalCommaExpr(InnerMatcher))))))));
   return ComplexMatcher.matches(Node, Finder, Builder);
 }
 
@@ -227,17 +227,18 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
   // A member function is assumed to be non-const when it is unresolved.
   const auto NonConstMethod = cxxMethodDecl(unless(isConst()));
   const auto AsNonConstThis = expr(anyOf(
-      cxxMemberCallExpr(
-          callee(NonConstMethod),
-          // E.g. casts from sub class to base class.
-          on(ignoringImpCasts(canResolveToExpr(equalsNode(Exp))))),
+      cxxMemberCallExpr(callee(NonConstMethod),
+                        on(canResolveToExpr(equalsNode(Exp)))),
       cxxOperatorCallExpr(callee(NonConstMethod),
                           hasArgument(0, canResolveToExpr(equalsNode(Exp)))),
       callExpr(
           callee(expr(anyOf(unresolvedMemberExpr(hasObjectExpression(
                                 canResolveToExpr(equalsNode(Exp)))),
                             cxxDependentScopeMemberExpr(hasObjectExpression(
-                                canResolveToExpr(equalsNode(Exp))))))))));
+                                canResolveToExpr(equalsNode(Exp)))))))),
+      callExpr(allOf(isTypeDependent(),
+                     callee(memberExpr(
+                         hasDeclaration(cxxMethodDecl(unless(isConst())))))))));
 
   // Taking address of 'Exp'.
   // We're assuming 'Exp' is mutated as soon as its address is taken, though in
@@ -409,10 +410,8 @@ const Stmt *ExprMutationAnalyzer::findRangeLoopMutation(const Expr *Exp) {
             Stm, Context);
   const auto *BadIteratorsContainer =
       selectFirst<Stmt>("stmt", RefToContainerBadIterators);
-  if (BadIteratorsContainer != nullptr) {
-    llvm::dbgs() << "Matched this For\n";
+  if (BadIteratorsContainer != nullptr)
     return BadIteratorsContainer;
-  }
 
   // If range for looping over 'Exp' with a non-const reference loop variable,
   // check all declRefExpr of the loop variable.
