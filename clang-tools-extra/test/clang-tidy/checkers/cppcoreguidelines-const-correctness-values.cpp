@@ -611,74 +611,18 @@ void TestRegisters() {
 }
 
 struct IntWrapper {
-   IntWrapper& operator=(unsigned value) { return *this; }
-   template<typename Istream>
-   friend Istream& operator>>(Istream& is, IntWrapper& rhs);
+  IntWrapper &operator=(unsigned value) { return *this; }
+  template <typename Istream>
+  friend Istream &operator>>(Istream &is, IntWrapper &rhs);
 };
 struct IntMaker {
   friend IntMaker &operator>>(IntMaker &, unsigned &);
 };
 template <typename Istream>
-Istream& operator>>(Istream& is, IntWrapper& rhs)  {
-    // Adding const is problematic!
-    unsigned np_local0 = 0;
-    is >> np_local0;
-    return is;
-}
-void TestHiddenFriend(IntMaker& im) {
-   IntWrapper iw;
-   im >> iw;
-}
-
-template <typename L, typename R>
-struct MyPair {
-  L left;
-  R right;
-  MyPair(const L &ll, const R &rr) : left{ll}, right{rr} {}
-};
-template <typename K, typename V>
-class MyDict {
-public:
-  static constexpr int initial_size = 16;
-  ~MyDict() {
-    if (items) {
-      delete[] items;
-    }
-  }
-
-  struct value_type {
-    K kk;
-    V vv;
-  };
-
-  using iterator = value_type *;
-  iterator begin() { return items; }
-  iterator end() { return items; }
-  iterator cbegin() const { return items; }
-  iterator cend() const { return items; }
-  void emplace(K kk, V vv) {}
-
-private:
-  value_type *items = nullptr;
-};
-
-MyDict<int, int> MakeDict() {
-  MyDict<int, int> np_dict;
-  np_dict.emplace(3, 4);
-  return np_dict;
-}
-
-void TestDict() {
-  auto np_dict = MakeDict();
-  for (auto &np_el : np_dict) {
-    np_el.vv += 2;
-  }
-}
-
-MyDict<double, double> MakeOtherDict() {
-  MyDict<double, double> np_dict;
-  np_dict.emplace(3., 4.);
-  return np_dict;
+Istream &operator>>(Istream &is, IntWrapper &rhs) {
+  unsigned np_local0 = 0;
+  is >> np_local0;
+  return is;
 }
 
 struct Actuator {
@@ -861,12 +805,20 @@ struct SmallVector : SmallVectorBase<T> {};
 
 template <class T>
 void EmitProtocolMethodList(T &&Methods) {
+  // Note: If the template is uninstantiated the analysis does not figure out,
+  // that p_local0 could be const. Not sure why, but probably bails because
+  // some expressions are type-dependant.
   SmallVector<const int *> p_local0;
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'SmallVector<const int *>' can be declared 'const'
   SmallVector<const int *> np_local0;
   for (const auto *I : Methods) {
-    if (I->isOptional())
+    if (I == nullptr)
       np_local0.push_back(I);
   }
   p_local0.size();
 }
-
+void instantiate() {
+  int *p_local0[4] = {nullptr, nullptr, nullptr, nullptr};
+  // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'p_local0' of type 'int *[4]' can be declared 'const'
+  EmitProtocolMethodList(p_local0);
+}

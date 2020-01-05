@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 #include "clang/Analysis/Analyses/ExprMutationAnalyzer.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
+#include "clang/ASTMatchers/ASTMatchers.h"
 #include "llvm/ADT/STLExtras.h"
 
 namespace clang {
@@ -227,15 +228,17 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
   // A member function is assumed to be non-const when it is unresolved.
   const auto NonConstMethod = cxxMethodDecl(unless(isConst()));
   const auto AsNonConstThis = expr(anyOf(
-      cxxMemberCallExpr(callee(NonConstMethod),
-                        on(canResolveToExpr(equalsNode(Exp)))),
-      cxxOperatorCallExpr(callee(NonConstMethod),
-                          hasArgument(0, canResolveToExpr(equalsNode(Exp)))),
-      callExpr(
-          callee(expr(anyOf(unresolvedMemberExpr(hasObjectExpression(
-                                canResolveToExpr(equalsNode(Exp)))),
-                            cxxDependentScopeMemberExpr(hasObjectExpression(
-                                canResolveToExpr(equalsNode(Exp)))))))),
+      cxxMemberCallExpr(
+          callee(NonConstMethod),
+          on(ignoringImpCasts(canResolveToExpr(equalsNode(Exp))))),
+      cxxOperatorCallExpr(
+          callee(NonConstMethod),
+          hasArgument(0, ignoringImpCasts(canResolveToExpr(equalsNode(Exp))))),
+      callExpr(callee(expr(
+          anyOf(unresolvedMemberExpr(hasObjectExpression(
+                    ignoringImpCasts(canResolveToExpr(equalsNode(Exp))))),
+                cxxDependentScopeMemberExpr(hasObjectExpression(
+                    ignoringImpCasts(canResolveToExpr(equalsNode(Exp))))))))),
       callExpr(allOf(isTypeDependent(),
                      callee(memberExpr(
                          hasDeclaration(cxxMethodDecl(unless(isConst())))))))));
