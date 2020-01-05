@@ -306,8 +306,7 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
       // Where the constructor of `Type` takes its argument as reference.
       // The AST does not resolve in a `cxxConstructExpr` because it is
       // type-dependent.
-      parenListExpr(allOf(hasParent(cxxNewExpr(isTypeDependent())),
-                          hasDescendant(equalsNode(Exp)))),
+      parenListExpr(hasDescendant(expr(canResolveToExpr(equalsNode(Exp))))),
       initListExpr(hasAnyArgumentExpr(expr(
           // If the initializer is for a reference type, there is no cast for
           // the variable. Values are casted to RValue first.
