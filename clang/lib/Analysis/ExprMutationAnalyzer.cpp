@@ -50,6 +50,20 @@ AST_MATCHER_P(Expr, canResolveToExpr, ast_matchers::internal::Matcher<Expr>,
   return ComplexMatcher.matches(Node, Finder, Builder);
 }
 
+// Similar to 'hasAnyArgument', but does not work because 'InitListExpr' does
+// not have the 'arguments()' method.
+AST_MATCHER_P(InitListExpr, hasAnyArgumentExpr,
+              ast_matchers::internal::Matcher<Expr>, InnerMatcher) {
+  for (const Expr *Arg : Node.inits()) {
+    ast_matchers::internal::BoundNodesTreeBuilder Result(*Builder);
+    if (InnerMatcher.matches(*Arg, Finder, &Result)) {
+      *Builder = std::move(Result);
+      return true;
+    }
+  }
+  return false;
+}
+
 const ast_matchers::internal::VariadicDynCastAllOfMatcher<Stmt, CXXTypeidExpr>
     cxxTypeidExpr;
 
@@ -293,7 +307,18 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
       // The AST does not resolve in a `cxxConstructExpr` because it is
       // type-dependent.
       parenListExpr(allOf(hasParent(cxxNewExpr(isTypeDependent())),
-                          hasDescendant(equalsNode(Exp)))));
+                          hasDescendant(equalsNode(Exp)))),
+      initListExpr(hasAnyArgumentExpr(expr(
+          // If the initializer is for a reference type, there is no cast for
+          // the variable. Values are casted to RValue first.
+          anyOf(canResolveToExpr(equalsNode(Exp)),
+                // Unless the value is a derived class and is assigned to a
+                // reference to the base class. Other implicit casts should not
+                // happen. Parens are ignored within 'canResolveToExpr'.
+                implicitCastExpr(anyOf(hasCastKind(CK_DerivedToBase),
+                                       hasCastKind(CK_UncheckedDerivedToBase)),
+                                 hasSourceExpression(
+                                     canResolveToExpr(equalsNode(Exp)))))))));
 
   // Captured by a lambda by reference.
   // If we're initializing a capture with 'Exp' directly then we're initializing

@@ -838,15 +838,32 @@ void another_struct_f() {
   base &np_local1 = np_local0.member;
   np_local1.member++;
 }
-struct false_positive {
+struct list_init {
   int &member;
 };
 void create_false_positive() {
-  // FIXME: This is a false positive from 'InitListExpr'
   int np_local0 = 42;
-  // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'np_local0' of type 'int' can be declared 'const'
-  false_positive p_local0 = {np_local0};
-  // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'p_local0' of type 'false_positive' can be declared 'const'
+  list_init p_local0 = {np_local0};
+  // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'p_local0' of type 'list_init' can be declared 'const'
+}
+struct list_init_derived {
+  base &member;
+};
+void list_init_derived_func() {
+  derived np_local0;
+  list_init_derived p_local0 = { np_local0 };
+  // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'p_local0' of type 'list_init_derived' can be declared 'const'
+}
+template <typename L, typename R>
+struct ref_pair {
+  L &first;
+  R &second;
+};
+template <typename T>
+void list_init_template() {
+  T np_local0{};
+  ref_pair<T, T> p_local0 = {np_local0, np_local0};
+  // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'p_local0' of type 'ref_pair<T, T>' can be declared 'const'
 }
 void cast_in_class_hierarchy() {
   derived np_local0;
