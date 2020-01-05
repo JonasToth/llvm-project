@@ -24,6 +24,7 @@ add_clang_library(clangTidyCppCoreGuidelinesModule
   SpecialMemberFunctionsCheck.cpp
 
   LINK_LIBS
+  clangAnalysis
   clangAST
   clangASTMatchers
   clangBasic
