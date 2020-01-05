@@ -822,3 +822,28 @@ void instantiate() {
   // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'p_local0' of type 'int *[4]' can be declared 'const'
   EmitProtocolMethodList(p_local0);
 }
+
+template <typename L, typename R>
+struct pair {
+  L first;
+  R second;
+};
+void pair_iteration() {
+  pair<bool, int[4]> p_local0{false, {1, 2, 3, 4}};
+  for (auto p_local : p_local0.second)
+    ;
+
+  pair<bool, int[4]> np_local0{false, {1, 2, 3, 4}};
+  for (auto &el : np_local0.second)
+    el++;
+
+  pair<bool, int[4]> ref_target{false, {1, 2, 3, 4}};
+
+  pair<bool, int[4]> &np_local1 = ref_target;
+  for (auto &el : np_local1.second)
+    ;
+
+  pair<bool, int[4]> &p_local2 = ref_target;
+  for (auto el : p_local2.second)
+    ;
+}
