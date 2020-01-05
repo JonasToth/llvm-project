@@ -610,19 +610,24 @@ void TestRegisters() {
   const unsigned p_val = p_reg1.another;
 }
 
-struct IntMaker {
-  operator bool() const;
+struct IntWrapper {
+   IntWrapper& operator=(unsigned value) { return *this; }
+   template<typename Istream>
+   friend Istream& operator>>(Istream& is, IntWrapper& rhs);
 };
-IntMaker &operator>>(IntMaker &, int &);
-int TestExtractionOperator() {
-  int np_foo;
-  IntMaker np_maker;
-  if (np_maker >> np_foo) {
-    return np_foo + 2;
-  }
-  int np_bar;
-  np_maker >> np_bar;
-  return np_bar;
+struct IntMaker {
+  friend IntMaker &operator>>(IntMaker &, unsigned &);
+};
+template <typename Istream>
+Istream& operator>>(Istream& is, IntWrapper& rhs)  {
+    // Adding const is problematic!
+    unsigned np_local0 = 0;
+    is >> np_local0;
+    return is;
+}
+void TestHiddenFriend(IntMaker& im) {
+   IntWrapper iw;
+   im >> iw;
 }
 
 template <typename L, typename R>
@@ -864,3 +869,4 @@ void EmitProtocolMethodList(T &&Methods) {
   }
   p_local0.size();
 }
+
