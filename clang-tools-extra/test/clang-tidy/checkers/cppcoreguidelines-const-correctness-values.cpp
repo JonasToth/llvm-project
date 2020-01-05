@@ -838,3 +838,18 @@ void another_struct_f() {
   base &np_local1 = np_local0.member;
   np_local1.member++;
 }
+struct false_positive {
+  int &member;
+};
+void create_false_positive() {
+  // FIXME: This is a false positive from 'InitListExpr'
+  int np_local0 = 42;
+  // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'np_local0' of type 'int' can be declared 'const'
+  false_positive p_local0 = {np_local0};
+  // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'p_local0' of type 'false_positive' can be declared 'const'
+}
+void cast_in_class_hierarchy() {
+  derived np_local0;
+  base p_local0 = static_cast<base &>(np_local0);
+  // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'p_local0' of type 'base' can be declared 'const'
+}

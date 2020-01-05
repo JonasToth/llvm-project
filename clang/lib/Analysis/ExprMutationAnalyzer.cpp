@@ -6,6 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 #include "clang/Analysis/Analyses/ExprMutationAnalyzer.h"
+#include "clang/AST/Expr.h"
+#include "clang/AST/OperationKinds.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "llvm/ADT/STLExtras.h"
@@ -39,7 +41,7 @@ AST_MATCHER_P(Expr, maybeEvalCommaExpr, ast_matchers::internal::Matcher<Expr>,
 
 AST_MATCHER_P(Expr, canResolveToExpr, ast_matchers::internal::Matcher<Expr>,
               InnerMatcher) {
-  auto ComplexMatcher = ignoringParens(expr(anyOf(
+  auto const ComplexMatcher = ignoringParens(expr(anyOf(
       maybeEvalCommaExpr(InnerMatcher),
       conditionalOperator(anyOf(
           hasTrueExpression(ignoringParens(maybeEvalCommaExpr(InnerMatcher))),
@@ -349,15 +351,30 @@ const Stmt *ExprMutationAnalyzer::findArrayElementMutation(const Expr *Exp) {
 }
 
 const Stmt *ExprMutationAnalyzer::findCastMutation(const Expr *Exp) {
+  // If the 'Exp' is explicitly casted to a non-const reference type the
+  // 'Exp' is considered to be modified.
+  const auto ExplicitCast =
+      match(findAll(stmt(castExpr(hasSourceExpression(ignoringParenImpCasts(
+                                      canResolveToExpr(equalsNode(Exp)))),
+                                  explicitCastExpr(hasDestinationType(
+                                      nonConstReferenceType()))))
+                        .bind("stmt")),
+            Stm, Context);
+
+  if (const auto *CastStmt = selectFirst<Stmt>("stmt", ExplicitCast))
+    return CastStmt;
+
   // If 'Exp' is casted to any non-const reference type, check the castExpr.
   const auto Casts = match(
-      findAll(castExpr(hasSourceExpression(canResolveToExpr(equalsNode(Exp))),
-                       anyOf(explicitCastExpr(
-                                 hasDestinationType(nonConstReferenceType())),
-                             implicitCastExpr(hasImplicitDestinationType(
-                                 nonConstReferenceType()))))
+      findAll(expr(castExpr(hasSourceExpression(ignoringParenImpCasts(
+                                canResolveToExpr(equalsNode(Exp)))),
+                            anyOf(explicitCastExpr(hasDestinationType(
+                                      nonConstReferenceType())),
+                                  implicitCastExpr(hasImplicitDestinationType(
+                                      nonConstReferenceType())))))
                   .bind(NodeID<Expr>::value)),
       Stm, Context);
+
   if (const Stmt *S = findExprMutation(Casts))
     return S;
   // Treat std::{move,forward} as cast.
@@ -387,10 +404,9 @@ const Stmt *ExprMutationAnalyzer::findRangeLoopMutation(const Expr *Exp) {
                        hasRangeInit(canResolveToExpr(equalsNode(Exp)))))
                   .bind("stmt")),
       Stm, Context);
-  const auto *BadRangeInitFromArray =
-      selectFirst<Stmt>("stmt", RefToArrayRefToElements);
 
-  if (BadRangeInitFromArray != nullptr)
+  if (const auto *BadRangeInitFromArray =
+          selectFirst<Stmt>("stmt", RefToArrayRefToElements))
     return BadRangeInitFromArray;
 
   // It is possible, that containers do not provide a const-overload for their
@@ -414,9 +430,9 @@ const Stmt *ExprMutationAnalyzer::findRangeLoopMutation(const Expr *Exp) {
                              hasRangeInit(canResolveToExpr(equalsNode(Exp))))))
                         .bind("stmt")),
             Stm, Context);
-  const auto *BadIteratorsContainer =
-      selectFirst<Stmt>("stmt", RefToContainerBadIterators);
-  if (BadIteratorsContainer != nullptr)
+
+  if (const auto *BadIteratorsContainer =
+          selectFirst<Stmt>("stmt", RefToContainerBadIterators))
     return BadIteratorsContainer;
 
   // If range for looping over 'Exp' with a non-const reference loop variable,
