@@ -798,6 +798,10 @@ struct SmallVectorBase {
   T data[4];
   void push_back(const T &el) {}
   int size() const { return 4; }
+  T *begin() { return data; }
+  const T *begin() const { return data; }
+  T *end() { return data + 4; }
+  const T *end() const { return data + 4; }
 };
 
 template <typename T>
@@ -822,28 +826,15 @@ void instantiate() {
   // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'p_local0' of type 'int *[4]' can be declared 'const'
   EmitProtocolMethodList(p_local0);
 }
-
-template <typename L, typename R>
-struct pair {
-  L first;
-  R second;
+struct base {
+  int member;
 };
-void pair_iteration() {
-  pair<bool, int[4]> p_local0{false, {1, 2, 3, 4}};
-  for (auto p_local : p_local0.second)
-    ;
-
-  pair<bool, int[4]> np_local0{false, {1, 2, 3, 4}};
-  for (auto &el : np_local0.second)
-    el++;
-
-  pair<bool, int[4]> ref_target{false, {1, 2, 3, 4}};
-
-  pair<bool, int[4]> &np_local1 = ref_target;
-  for (auto &el : np_local1.second)
-    ;
-
-  pair<bool, int[4]> &p_local2 = ref_target;
-  for (auto el : p_local2.second)
-    ;
+struct derived : base {};
+struct another_struct {
+  derived member;
+};
+void another_struct_f() {
+  another_struct np_local0{};
+  base &np_local1 = np_local0.member;
+  np_local1.member++;
 }

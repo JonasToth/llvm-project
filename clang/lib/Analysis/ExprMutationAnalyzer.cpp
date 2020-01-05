@@ -271,7 +271,10 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
   // findFunctionArgMutation which has additional smarts for handling forwarding
   // references.
   const auto NonConstRefParam = forEachArgumentWithParamType(
-      canResolveToExpr(equalsNode(Exp)), nonConstReferenceType());
+      anyOf(canResolveToExpr(equalsNode(Exp)),
+            ignoringImpCasts(memberExpr(
+                hasObjectExpression(canResolveToExpr(equalsNode(Exp)))))),
+      nonConstReferenceType());
   const auto NotInstantiated = unless(hasDeclaration(isInstantiated()));
   const auto AsNonConstRefArg = anyOf(
       callExpr(NonConstRefParam, NotInstantiated),
@@ -444,24 +447,20 @@ const Stmt *ExprMutationAnalyzer::findReferenceMutation(const Expr *Exp) {
     return S;
 
   // If 'Exp' is bound to a non-const reference, check all declRefExpr to that.
-  const auto Refs = match(
-      stmt(forEachDescendant(
-          varDecl(
-              hasType(nonConstReferenceType()),
-              hasInitializer(anyOf(
-                  canResolveToExpr(equalsNode(Exp)),
-                  conditionalOperator(anyOf(
-                      hasTrueExpression(canResolveToExpr(equalsNode(Exp))),
-                      hasFalseExpression(canResolveToExpr(equalsNode(Exp))))),
-                  memberExpr(hasObjectExpression(ignoringParenImpCasts(
-                      canResolveToExpr(equalsNode(Exp))))))),
-              hasParent(declStmt().bind("stmt")),
-              // Don't follow the reference in range statement, we've
-              // handled that separately.
-              unless(hasParent(declStmt(hasParent(
-                  cxxForRangeStmt(hasRangeStmt(equalsBoundNode("stmt"))))))))
-              .bind(NodeID<Decl>::value))),
-      Stm, Context);
+  const auto Refs =
+      match(stmt(forEachDescendant(
+                varDecl(hasType(nonConstReferenceType()),
+                        hasInitializer(anyOf(
+                            canResolveToExpr(equalsNode(Exp)),
+                            ignoringImpCasts(memberExpr(hasObjectExpression(
+                                canResolveToExpr(equalsNode(Exp))))))),
+                        hasParent(declStmt().bind("stmt")),
+                        // Don't follow the reference in range statement, we've
+                        // handled that separately.
+                        unless(hasParent(declStmt(hasParent(cxxForRangeStmt(
+                            hasRangeStmt(equalsBoundNode("stmt"))))))))
+                    .bind(NodeID<Decl>::value))),
+            Stm, Context);
   return findDeclMutation(Refs);
 }
 
