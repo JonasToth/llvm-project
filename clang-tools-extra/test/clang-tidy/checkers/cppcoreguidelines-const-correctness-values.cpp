@@ -575,6 +575,25 @@ void placement_new_in_unique_ptr() {
   new to_construct<T>(np_local0);
 }
 
+struct stream_obj {};
+stream_obj &operator>>(stream_obj &o, unsigned &foo);
+void input_operator() {
+  stream_obj np_local0;
+  unsigned np_local1 = 42;
+  np_local0 >> np_local1;
+}
+
+struct stream_obj_template {};
+template <typename IStream>
+IStream &operator>>(IStream &o, unsigned &foo);
+
+template <typename Stream>
+void input_operator_template() {
+  Stream np_local0;
+  unsigned np_local1 = 42;
+  np_local0 >> np_local1;
+}
+
 // Test bit fields
 struct HardwareRegister {
   unsigned field : 5;
