@@ -10,6 +10,7 @@
 #include "../utils/FixItHintUtils.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
+#include "clang/ASTMatchers/ASTMatchers.h"
 
 using namespace clang::ast_matchers;
 
@@ -50,6 +51,8 @@ void ConstCorrectnessCheck::registerMatchers(MatchFinder *Finder) {
       referenceType(anyOf(rValueReferenceType(), unless(isSpelledAsLValue()))));
   const auto TemplateType = anyOf(hasType(templateTypeParmType()),
                                   hasType(substTemplateTypeParmType()));
+  const auto FunctionPointerRef =
+      hasType(hasCanonicalType(referenceType(pointee(functionType()))));
 
   // Match local variables which could be 'const' if not modified later.
   // Example: `int i = 10` would match `int i`.
@@ -60,13 +63,13 @@ void ConstCorrectnessCheck::registerMatchers(MatchFinder *Finder) {
 
   // Match the function scope for which the analysis of all local variables
   // shall be run.
-  const auto FunctionScope = functionDecl(hasBody(
-      compoundStmt(
-          findAll(declStmt(allOf(containsDeclaration2(
-                                     LocalValDecl.bind("new-local-value")),
-                                 unless(has(decompositionDecl()))))
-                      .bind("decl-stmt")))
-          .bind("scope")));
+  const auto FunctionScope = functionDecl(
+      hasBody(compoundStmt(
+                  findAll(declStmt(allOf(containsDeclaration2(LocalValDecl.bind(
+                                             "new-local-value")),
+                                         unless(has(decompositionDecl()))))
+                              .bind("decl-stmt")))
+                  .bind("scope")));
 
   Finder->addMatcher(FunctionScope, this);
 }

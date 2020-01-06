@@ -240,6 +240,7 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
       unaryOperator(anyOf(hasOperatorName("++"), hasOperatorName("--")),
                     hasUnaryOperand(canResolveToExpr(equalsNode(Exp))));
 
+  const auto NotInstantiated = unless(hasDeclaration(isInstantiated()));
   // Invoking non-const member function.
   // A member function is assumed to be non-const when it is unresolved.
   const auto NonConstMethod = cxxMethodDecl(unless(isConst()));
@@ -250,6 +251,14 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
       cxxOperatorCallExpr(
           callee(NonConstMethod),
           hasArgument(0, ignoringImpCasts(canResolveToExpr(equalsNode(Exp))))),
+      // operator call expression might be unresolved as well. If that is 
+      // the case and the operator is called on the 'Exp' itself, this is
+      // considered a moditication.
+      cxxOperatorCallExpr(
+          callee(expr(anyOf(unresolvedLookupExpr(), unresolvedMemberExpr(),
+                            cxxDependentScopeMemberExpr(),
+                            hasType(templateTypeParmType())))),
+          hasArgument(0, canResolveToExpr(equalsNode(Exp)))),
       callExpr(callee(expr(
           anyOf(unresolvedMemberExpr(hasObjectExpression(
                     ignoringImpCasts(canResolveToExpr(equalsNode(Exp))))),
@@ -291,7 +300,6 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
             ignoringImpCasts(memberExpr(
                 hasObjectExpression(canResolveToExpr(equalsNode(Exp)))))),
       nonConstReferenceType());
-  const auto NotInstantiated = unless(hasDeclaration(isInstantiated()));
   const auto AsNonConstRefArg = anyOf(
       callExpr(NonConstRefParam, NotInstantiated),
       cxxConstructExpr(NonConstRefParam, NotInstantiated),

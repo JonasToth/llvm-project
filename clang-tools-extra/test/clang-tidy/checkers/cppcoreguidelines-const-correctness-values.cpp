@@ -823,7 +823,7 @@ void EmitProtocolMethodList(T &&Methods) {
 }
 void instantiate() {
   int *p_local0[4] = {nullptr, nullptr, nullptr, nullptr};
-  // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'p_local0' of type 'int *[4]' can be declared 'const'
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'int *[4]' can be declared 'const'
   EmitProtocolMethodList(p_local0);
 }
 struct base {
@@ -851,7 +851,7 @@ struct list_init_derived {
 };
 void list_init_derived_func() {
   derived np_local0;
-  list_init_derived p_local0 = { np_local0 };
+  list_init_derived p_local0 = {np_local0};
   // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'p_local0' of type 'list_init_derived' can be declared 'const'
 }
 template <typename L, typename R>
@@ -870,3 +870,34 @@ void cast_in_class_hierarchy() {
   base p_local0 = static_cast<base &>(np_local0);
   // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'p_local0' of type 'base' can be declared 'const'
 }
+
+void function_ref_target(int);
+using my_function_type = void (&)(int);
+void func_references() {
+  // Could be const, because the reference is not adjusted but adding that
+  // has no effect and creates a compiler warning.
+  my_function_type ptr = function_ref_target;
+}
+
+#if 0
+struct my_class {
+  void method_takes_ref(base &r) { (void)r; }
+  void call_through_lambda_this() {
+    derived np_local0{};
+    auto my_lambda = [this](base &arg) { return method_takes_ref(arg); };
+    my_lambda(np_local0);
+  }
+};
+
+struct my_class_operator {
+  bool operator==(const my_class_operator &otha) {
+    return true;
+  }
+};
+void false_postive_overloaded_operator() {
+  my_class_operator f0{};
+  my_class_operator const f1{};
+  my_class_operator &f_ref = f0;
+  f0 == f1;
+}
+#endif
