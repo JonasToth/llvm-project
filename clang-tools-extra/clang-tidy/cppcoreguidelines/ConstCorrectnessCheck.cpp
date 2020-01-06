@@ -39,7 +39,7 @@ void ConstCorrectnessCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
 
   Options.store(Opts, "TransformValues", TransformValues);
   Options.store(Opts, "TransformReferences", TransformReferences);
-  // FIXME: Pointee analysis not proper yet?
+  // FIXME: Pointee analysis is not implemented yet.
   // Options.store(Opts, "TransformPointees", TransformPointees);
   Options.store(Opts, "TransformPointersAsValues", TransformPointersAsValues);
 }
@@ -56,10 +56,11 @@ void ConstCorrectnessCheck::registerMatchers(MatchFinder *Finder) {
 
   // Match local variables which could be 'const' if not modified later.
   // Example: `int i = 10` would match `int i`.
-  const auto LocalValDecl = varDecl(allOf(
-      isLocal(), hasInitializer(anything()),
-      unless(anyOf(ConstType, ConstReference, TemplateType, RValueReference,
-                   hasType(cxxRecordDecl(isLambda())), isImplicit()))));
+  const auto LocalValDecl = varDecl(
+      allOf(isLocal(), hasInitializer(anything()),
+            unless(anyOf(ConstType, ConstReference, TemplateType,
+                         RValueReference, FunctionPointerRef,
+                         hasType(cxxRecordDecl(isLambda())), isImplicit()))));
 
   // Match the function scope for which the analysis of all local variables
   // shall be run.
