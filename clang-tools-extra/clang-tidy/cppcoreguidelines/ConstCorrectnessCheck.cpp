@@ -49,8 +49,20 @@ void ConstCorrectnessCheck::registerMatchers(MatchFinder *Finder) {
   const auto ConstReference = hasType(references(isConstQualified()));
   const auto RValueReference = hasType(
       referenceType(anyOf(rValueReferenceType(), unless(isSpelledAsLValue()))));
-  const auto TemplateType = anyOf(hasType(templateTypeParmType()),
-                                  hasType(substTemplateTypeParmType()));
+  const auto TemplateType = anyOf(
+      hasType(hasCanonicalType(templateTypeParmType())),
+      hasType(/*FIXME: Why is this not working?:  hasCanonicalType(*/
+              substTemplateTypeParmType()) /*)*/,
+      // Matches when 'auto' deduced to a template type or a substituted
+      // template type.
+      allOf(anyOf(hasType(autoType()),
+                  hasType(referenceType(pointee(autoType()))),
+                  hasType(pointerType(pointee(autoType())))),
+            hasInitializer(isInstantiationDependent())),
+      // References to template types, their substitutions or typedefs to
+      // template types need to be considered as well.
+      hasType(referenceType(pointee(hasCanonicalType(templateTypeParmType())))),
+      hasType(referenceType(pointee(substTemplateTypeParmType()))));
   const auto FunctionPointerRef =
       hasType(hasCanonicalType(referenceType(pointee(functionType()))));
 

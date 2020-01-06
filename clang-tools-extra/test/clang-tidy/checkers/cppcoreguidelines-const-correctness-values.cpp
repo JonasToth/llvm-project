@@ -207,12 +207,44 @@ void define_locals(T np_arg0, T &np_arg1, int np_arg2) {
   np_local4 += p_local0;
 }
 
+template <typename T>
+void more_template_locals() {
+  const T np_local0 = {};
+  auto np_local1 = T{};
+  T &np_local2 = np_local1;
+  T *np_local_ptr = &np_local1;
+
+  const auto np_local3 = T{};
+  // FIXME: False positive, the reference points to a template type and needs
+  // to be excluded from analysis, but somehow isn't (matchers don't work)
+  auto &np_local4 = np_local3;
+
+  const auto *np_local5 = &np_local3;
+  auto *np_local6 = &np_local1;
+
+  using TypedefToTemplate = T;
+  TypedefToTemplate np_local7{};
+  // FIXME: False positive, the reference points to a template type and needs
+  // to be excluded from analysis, but somehow isn't (matchers don't work)
+  // auto &np_local8 = np_local7;
+  const auto &np_local9 = np_local7;
+  auto np_local10 = np_local7;
+  auto *np_local11 = &np_local10;
+  const auto *const np_local12 = &np_local10;
+
+  // FIXME: False positive, the reference points to a template type and needs
+  // to be excluded from analysis, but somehow isn't (matchers don't work)
+  // TypedefToTemplate &np_local13 = np_local7;
+  TypedefToTemplate *np_local14 = &np_local7;
+}
+
 void template_instantiation() {
   const int np_local0 = 42;
   int np_local1 = 42;
 
   define_locals(np_local0, np_local1, np_local0);
   define_locals(np_local1, np_local1, np_local1);
+  more_template_locals<int>();
 }
 
 struct ConstNonConstClass {

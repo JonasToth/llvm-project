@@ -35,7 +35,7 @@ void nested_scopes() {
 
 template <typename T>
 void define_locals(T np_arg0, T &np_arg1, int np_arg2) {
-  T p_local0 = 0;
+  T np_local0 = 0;
   int p_local1 = 42;
   // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local1' of type 'int' can be declared 'const'
   // CHECK-FIXES: const
