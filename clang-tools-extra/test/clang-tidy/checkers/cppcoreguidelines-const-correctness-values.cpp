@@ -1,4 +1,9 @@
-// RUN: %check_clang_tidy %s cppcoreguidelines-const-correctness %t
+// RUN: %check_clang_tidy %s cppcoreguidelines-const-correctness %t -- \
+// RUN:   -config="{CheckOptions: [\
+// RUN:   {key: 'cppcoreguidelines-const-correctness.TransformValues', value: 1}, \
+// RUN:   {key: 'cppcoreguidelines-const-correctness.WarnPointersAsValues', value: 0}, \
+// RUN:   {key: 'cppcoreguidelines-const-correctness.TransformPointersAsValues', value: 0}, \
+// RUN:   ]}" --
 
 // ------- Provide test samples for primitive builtins ---------
 // - every 'p_*' variable is a 'potential_const_*' variable

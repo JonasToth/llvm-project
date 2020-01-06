@@ -41,12 +41,22 @@ AST_MATCHER_P(Expr, maybeEvalCommaExpr, ast_matchers::internal::Matcher<Expr>,
 
 AST_MATCHER_P(Expr, canResolveToExpr, ast_matchers::internal::Matcher<Expr>,
               InnerMatcher) {
-  auto const ComplexMatcher = ignoringParens(expr(anyOf(
-      maybeEvalCommaExpr(InnerMatcher),
-      conditionalOperator(anyOf(
-          hasTrueExpression(ignoringParens(maybeEvalCommaExpr(InnerMatcher))),
-          hasFalseExpression(
-              ignoringParens(maybeEvalCommaExpr(InnerMatcher))))))));
+  // Unless the value is a derived class and is assigned to a
+  // reference to the base class. Other implicit casts should not
+  // happen.
+  const auto IgnoreDerivedToBase = ignoringParens(
+      expr(anyOf(implicitCastExpr(anyOf(hasCastKind(CK_DerivedToBase),
+                                        hasCastKind(CK_UncheckedDerivedToBase)),
+                                  hasSourceExpression(InnerMatcher)),
+                 InnerMatcher)));
+
+  auto const ComplexMatcher = ignoringParens(
+      expr(anyOf(maybeEvalCommaExpr(IgnoreDerivedToBase),
+                 conditionalOperator(
+                     anyOf(hasTrueExpression(ignoringParens(
+                               maybeEvalCommaExpr(IgnoreDerivedToBase))),
+                           hasFalseExpression(ignoringParens(
+                               maybeEvalCommaExpr(IgnoreDerivedToBase))))))));
   return ComplexMatcher.matches(Node, Finder, Builder);
 }
 
@@ -251,7 +261,7 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
       cxxOperatorCallExpr(
           callee(NonConstMethod),
           hasArgument(0, ignoringImpCasts(canResolveToExpr(equalsNode(Exp))))),
-      // operator call expression might be unresolved as well. If that is 
+      // operator call expression might be unresolved as well. If that is
       // the case and the operator is called on the 'Exp' itself, this is
       // considered a moditication.
       cxxOperatorCallExpr(
@@ -315,17 +325,10 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
       // The AST does not resolve in a `cxxConstructExpr` because it is
       // type-dependent.
       parenListExpr(hasDescendant(expr(canResolveToExpr(equalsNode(Exp))))),
-      initListExpr(hasAnyArgumentExpr(expr(
-          // If the initializer is for a reference type, there is no cast for
-          // the variable. Values are casted to RValue first.
-          anyOf(canResolveToExpr(equalsNode(Exp)),
-                // Unless the value is a derived class and is assigned to a
-                // reference to the base class. Other implicit casts should not
-                // happen. Parens are ignored within 'canResolveToExpr'.
-                implicitCastExpr(anyOf(hasCastKind(CK_DerivedToBase),
-                                       hasCastKind(CK_UncheckedDerivedToBase)),
-                                 hasSourceExpression(
-                                     canResolveToExpr(equalsNode(Exp)))))))));
+      // If the initializer is for a reference type, there is no cast for
+      // the variable. Values are casted to RValue first.
+      initListExpr(
+          hasAnyArgumentExpr(expr(canResolveToExpr(equalsNode(Exp))))));
 
   // Captured by a lambda by reference.
   // If we're initializing a capture with 'Exp' directly then we're initializing
@@ -385,13 +388,13 @@ const Stmt *ExprMutationAnalyzer::findArrayElementMutation(const Expr *Exp) {
 const Stmt *ExprMutationAnalyzer::findCastMutation(const Expr *Exp) {
   // If the 'Exp' is explicitly casted to a non-const reference type the
   // 'Exp' is considered to be modified.
-  const auto ExplicitCast =
-      match(findAll(stmt(castExpr(hasSourceExpression(ignoringParenImpCasts(
-                                      canResolveToExpr(equalsNode(Exp)))),
-                                  explicitCastExpr(hasDestinationType(
-                                      nonConstReferenceType()))))
-                        .bind("stmt")),
-            Stm, Context);
+  const auto ExplicitCast = match(
+      findAll(
+          stmt(castExpr(hasSourceExpression(canResolveToExpr(equalsNode(Exp))),
+                        explicitCastExpr(
+                            hasDestinationType(nonConstReferenceType()))))
+              .bind("stmt")),
+      Stm, Context);
 
   if (const auto *CastStmt = selectFirst<Stmt>("stmt", ExplicitCast))
     return CastStmt;
