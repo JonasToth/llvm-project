@@ -903,9 +903,10 @@ void list_init_template() {
   // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'p_local0' of type 'ref_pair<T, T>' can be declared 'const'
 }
 void cast_in_class_hierarchy() {
-  derived np_local0;
-  base p_local0 = static_cast<base &>(np_local0);
-  // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'p_local0' of type 'base' can be declared 'const'
+  derived p_local0;
+  // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'p_local0' of type 'derived' can be declared 'const'
+  base p_local1 = static_cast<base &>(p_local0);
+  // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'p_local1' of type 'base' can be declared 'const'
 }
 
 void function_ref_target(int);
