@@ -307,8 +307,7 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
   // references.
   const auto NonConstRefParam = forEachArgumentWithParamType(
       anyOf(canResolveToExpr(equalsNode(Exp)),
-            ignoringImpCasts(memberExpr(
-                hasObjectExpression(canResolveToExpr(equalsNode(Exp)))))),
+            memberExpr(hasObjectExpression(canResolveToExpr(equalsNode(Exp))))),
       nonConstReferenceType());
   const auto AsNonConstRefArg = anyOf(
       callExpr(NonConstRefParam, NotInstantiated),
@@ -364,28 +363,32 @@ const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
 
 const Stmt *ExprMutationAnalyzer::findMemberMutation(const Expr *Exp) {
   // Check whether any member of 'Exp' is mutated.
-  const auto MemberExprs = match(
-      findAll(
-          expr(anyOf(memberExpr(hasObjectExpression(
-                         ignoringImpCasts(canResolveToExpr(equalsNode(Exp))))),
-                     cxxDependentScopeMemberExpr(hasObjectExpression(
-                         ignoringImpCasts(canResolveToExpr(equalsNode(Exp)))))))
-              .bind(NodeID<Expr>::value)),
-      Stm, Context);
+  const auto MemberExprs =
+      match(findAll(expr(anyOf(memberExpr(hasObjectExpression(
+                                   canResolveToExpr(equalsNode(Exp)))),
+                               cxxDependentScopeMemberExpr(hasObjectExpression(
+                                   canResolveToExpr(equalsNode(Exp))))))
+                        .bind(NodeID<Expr>::value)),
+            Stm, Context);
   return findExprMutation(MemberExprs);
 }
 
 const Stmt *ExprMutationAnalyzer::findArrayElementMutation(const Expr *Exp) {
   // Check whether any element of an array is mutated.
-  const auto SubscriptExprs = match(
-      findAll(arraySubscriptExpr(
-                  hasBase(ignoringImpCasts(canResolveToExpr(equalsNode(Exp)))))
-                  .bind(NodeID<Expr>::value)),
-      Stm, Context);
+  const auto SubscriptExprs =
+      match(findAll(arraySubscriptExpr(
+                        anyOf(hasBase(canResolveToExpr(equalsNode(Exp))),
+                              hasBase(implicitCastExpr(
+                                  allOf(hasCastKind(CK_ArrayToPointerDecay),
+                                        hasSourceExpression(canResolveToExpr(
+                                            equalsNode(Exp))))))))
+                        .bind(NodeID<Expr>::value)),
+            Stm, Context);
   return findExprMutation(SubscriptExprs);
 }
 
 const Stmt *ExprMutationAnalyzer::findCastMutation(const Expr *Exp) {
+#if 0
   // If the 'Exp' is explicitly casted to a non-const reference type the
   // 'Exp' is considered to be modified.
   const auto ExplicitCast = match(
@@ -398,16 +401,17 @@ const Stmt *ExprMutationAnalyzer::findCastMutation(const Expr *Exp) {
 
   if (const auto *CastStmt = selectFirst<Stmt>("stmt", ExplicitCast))
     return CastStmt;
+#endif
 
   // If 'Exp' is casted to any non-const reference type, check the castExpr.
   const auto Casts = match(
-      findAll(expr(castExpr(hasSourceExpression(ignoringParenImpCasts(
-                                canResolveToExpr(equalsNode(Exp)))),
-                            anyOf(explicitCastExpr(hasDestinationType(
-                                      nonConstReferenceType())),
-                                  implicitCastExpr(hasImplicitDestinationType(
-                                      nonConstReferenceType())))))
-                  .bind(NodeID<Expr>::value)),
+      findAll(
+          expr(castExpr(hasSourceExpression(canResolveToExpr(equalsNode(Exp))),
+                        anyOf(explicitCastExpr(
+                                  hasDestinationType(nonConstReferenceType())),
+                              implicitCastExpr(hasImplicitDestinationType(
+                                  nonConstReferenceType())))))
+              .bind(NodeID<Expr>::value)),
       Stm, Context);
 
   if (const Stmt *S = findExprMutation(Casts))
@@ -498,20 +502,20 @@ const Stmt *ExprMutationAnalyzer::findReferenceMutation(const Expr *Exp) {
     return S;
 
   // If 'Exp' is bound to a non-const reference, check all declRefExpr to that.
-  const auto Refs =
-      match(stmt(forEachDescendant(
-                varDecl(hasType(nonConstReferenceType()),
-                        hasInitializer(anyOf(
-                            canResolveToExpr(equalsNode(Exp)),
-                            ignoringImpCasts(memberExpr(hasObjectExpression(
-                                canResolveToExpr(equalsNode(Exp))))))),
-                        hasParent(declStmt().bind("stmt")),
-                        // Don't follow the reference in range statement, we've
-                        // handled that separately.
-                        unless(hasParent(declStmt(hasParent(cxxForRangeStmt(
-                            hasRangeStmt(equalsBoundNode("stmt"))))))))
-                    .bind(NodeID<Decl>::value))),
-            Stm, Context);
+  const auto Refs = match(
+      stmt(forEachDescendant(
+          varDecl(
+              hasType(nonConstReferenceType()),
+              hasInitializer(anyOf(canResolveToExpr(equalsNode(Exp)),
+                                   memberExpr(hasObjectExpression(
+                                       canResolveToExpr(equalsNode(Exp)))))),
+              hasParent(declStmt().bind("stmt")),
+              // Don't follow the reference in range statement, we've
+              // handled that separately.
+              unless(hasParent(declStmt(hasParent(
+                  cxxForRangeStmt(hasRangeStmt(equalsBoundNode("stmt"))))))))
+              .bind(NodeID<Decl>::value))),
+      Stm, Context);
   return findDeclMutation(Refs);
 }
 

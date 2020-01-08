@@ -1047,20 +1047,22 @@ TEST(ExprMutationAnalyzerTest, RangeForArrayByRefModified) {
       buildASTFromCode("void f() { int x[2]; for (int& e : x) e = 10; }");
   auto Results =
       match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
-  EXPECT_THAT(mutatedBy(Results, AST.get()), ElementsAre("e", "e = 10"));
+  EXPECT_THAT(mutatedBy(Results, AST.get()),
+              ElementsAre("for (int &e : x)\n    e = 10;"));
 
   AST = buildASTFromCode("typedef int& IntRef;"
                          "void f() { int x[2]; for (IntRef e : x) e = 10; }");
   Results = match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
-  EXPECT_THAT(mutatedBy(Results, AST.get()), ElementsAre("e", "e = 10"));
+  EXPECT_THAT(mutatedBy(Results, AST.get()),
+              ElementsAre("for (IntRef e : x)\n    e = 10;"));
 }
 
-TEST(ExprMutationAnalyzerTest, RangeForArrayByRefNotModified) {
+TEST(ExprMutationAnalyzerTest, RangeForArrayByRefModifiedByImplicitInit) {
   const auto AST =
       buildASTFromCode("void f() { int x[2]; for (int& e : x) e; }");
   const auto Results =
       match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
-  EXPECT_FALSE(isMutated(Results, AST.get()));
+  EXPECT_TRUE(isMutated(Results, AST.get()));
 }
 
 TEST(ExprMutationAnalyzerTest, RangeForArrayByValue) {
@@ -1100,7 +1102,8 @@ TEST(ExprMutationAnalyzerTest, RangeForNonArrayByRefModified) {
                        "void f() { V x; for (int& e : x) e = 10; }");
   const auto Results =
       match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
-  EXPECT_THAT(mutatedBy(Results, AST.get()), ElementsAre("e", "e = 10"));
+  EXPECT_THAT(mutatedBy(Results, AST.get()),
+              ElementsAre("for (int &e : x)\n    e = 10;"));
 }
 
 TEST(ExprMutationAnalyzerTest, RangeForNonArrayByRefNotModified) {
@@ -1108,7 +1111,7 @@ TEST(ExprMutationAnalyzerTest, RangeForNonArrayByRefNotModified) {
                                     "void f() { V x; for (int& e : x) e; }");
   const auto Results =
       match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
-  EXPECT_FALSE(isMutated(Results, AST.get()));
+  EXPECT_TRUE(isMutated(Results, AST.get()));
 }
 
 TEST(ExprMutationAnalyzerTest, RangeForNonArrayByValue) {
