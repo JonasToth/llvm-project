@@ -79,7 +79,7 @@ void ConstCorrectnessCheck::registerMatchers(MatchFinder *Finder) {
   const auto FunctionScope = functionDecl(
       hasBody(compoundStmt(
                   findAll(declStmt(allOf(containsDeclaration2(LocalValDecl.bind(
-                                             "new-local-value")),
+                                             "local-value")),
                                          unless(has(decompositionDecl()))))
                               .bind("decl-stmt")))
                   .bind("scope")));
@@ -95,7 +95,7 @@ void ConstCorrectnessCheck::check(const MatchFinder::MatchResult &Result) {
   assert(LocalScope && "Did not match scope for local variable");
   registerScope(LocalScope, Result.Context);
 
-  const auto *Variable = Result.Nodes.getNodeAs<VarDecl>("new-local-value");
+  const auto *Variable = Result.Nodes.getNodeAs<VarDecl>("local-value");
   assert(Variable && "Did not match local variable definition");
 
   VariableCategory VC = VariableCategory::Value;
