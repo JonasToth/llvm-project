@@ -1994,18 +1994,6 @@ AST_MATCHER_P(CXXForRangeStmt, hasRangeInit, internal::Matcher<Expr>,
   return (Init != nullptr && InnerMatcher.matches(*Init, Finder, Builder));
 }
 
-/// Matches the implicit DeclStmt for the begin iterator.
-AST_MATCHER_P(CXXForRangeStmt, hasBeginDeclStmt,
-              ast_matchers::internal::Matcher<DeclStmt>, InnerMatcher) {
-  return InnerMatcher.matches(*Node.getBeginStmt(), Finder, Builder);
-}
-
-/// Matches the implicit DeclStmt for the end iterator.
-AST_MATCHER_P(CXXForRangeStmt, hasEndDeclStmt,
-              ast_matchers::internal::Matcher<DeclStmt>, InnerMatcher) {
-  return InnerMatcher.matches(*Node.getEndStmt(), Finder, Builder);
-}
-
 /// Matches while statements.
 ///
 /// Given
@@ -5272,38 +5260,6 @@ AST_POLYMORPHIC_MATCHER(
     isArrow, AST_POLYMORPHIC_SUPPORTED_TYPES(MemberExpr, UnresolvedMemberExpr,
                                              CXXDependentScopeMemberExpr)) {
   return Node.isArrow();
-}
-
-/// Matches QualType nodes that are of function pointer type.
-///
-/// Given
-/// \code
-///   int f(int);
-///   int (*f_ptr)(int) = f;
-///   int *p;
-/// \endcode
-/// varDecl(hasType(isFunctionPointerType()))
-/// matches "f_ptr" but not "p".
-AST_MATCHER(QualType, isFunctionPointerType) {
-    return Node->isFunctionPointerType();
-}
-
-/// Matches QualType nodes that are of member function pointer type.
-///
-/// Given
-/// \code
-///   struct A {
-///     int f() { return 1; }
-///     int (A::*x)();
-///   };
-///   A a;
-///   a.x = &A::f;
-///   int *p;
-/// \endcode
-/// declRefExpr(ignoringImpCasts(hasType(isMemberFunctionPointerType())))
-/// matches "&A::f".
-AST_MATCHER(QualType, isMemberFunctionPointerType) {
-    return Node->isMemberFunctionPointerType();
 }
 
 /// Matches QualType nodes that are of integer type.
