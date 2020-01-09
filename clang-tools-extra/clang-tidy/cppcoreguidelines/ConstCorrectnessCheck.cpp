@@ -49,6 +49,7 @@ void ConstCorrectnessCheck::registerMatchers(MatchFinder *Finder) {
   const auto ConstReference = hasType(references(isConstQualified()));
   const auto RValueReference = hasType(
       referenceType(anyOf(rValueReferenceType(), unless(isSpelledAsLValue()))));
+
   const auto TemplateType = anyOf(
       hasType(hasCanonicalType(templateTypeParmType())),
       hasType(/*FIXME: Why is this not working?:  hasCanonicalType(*/
@@ -63,6 +64,12 @@ void ConstCorrectnessCheck::registerMatchers(MatchFinder *Finder) {
       // template types need to be considered as well.
       hasType(referenceType(pointee(hasCanonicalType(templateTypeParmType())))),
       hasType(referenceType(pointee(substTemplateTypeParmType()))));
+
+  const auto AutoTemplateType = varDecl(
+      anyOf(hasType(autoType()), hasType(referenceType(pointee(autoType()))),
+            hasType(pointerType(pointee(autoType())))),
+      hasInitializer(isTypeDependent()));
+
   const auto FunctionPointerRef =
       hasType(hasCanonicalType(referenceType(pointee(functionType()))));
 
@@ -71,18 +78,17 @@ void ConstCorrectnessCheck::registerMatchers(MatchFinder *Finder) {
   const auto LocalValDecl = varDecl(
       allOf(isLocal(), hasInitializer(anything()),
             unless(anyOf(ConstType, ConstReference, TemplateType,
-                         RValueReference, FunctionPointerRef,
+                         AutoTemplateType, RValueReference, FunctionPointerRef,
                          hasType(cxxRecordDecl(isLambda())), isImplicit()))));
 
   // Match the function scope for which the analysis of all local variables
   // shall be run.
-  const auto FunctionScope = functionDecl(
-      hasBody(compoundStmt(
-                  findAll(declStmt(allOf(containsDeclaration2(LocalValDecl.bind(
-                                             "local-value")),
-                                         unless(has(decompositionDecl()))))
-                              .bind("decl-stmt")))
-                  .bind("scope")));
+  const auto FunctionScope = functionDecl(hasBody(
+      compoundStmt(findAll(declStmt(allOf(containsDeclaration2(
+                                              LocalValDecl.bind("local-value")),
+                                          unless(has(decompositionDecl()))))
+                               .bind("decl-stmt")))
+          .bind("scope")));
 
   Finder->addMatcher(FunctionScope, this);
 }
@@ -107,6 +113,11 @@ void ConstCorrectnessCheck::check(const MatchFinder::MatchResult &Result) {
   // Each variable can only in one category: Value, Pointer, Reference.
   // Analysis can be controlled for every category.
   if (VC == VariableCategory::Reference && !AnalyzeReferences)
+    return;
+
+  if (VC == VariableCategory::Reference &&
+      Variable->getType()->getPointeeType()->isPointerType() &&
+      !WarnPointersAsValues)
     return;
 
   if (VC == VariableCategory::Pointer && !WarnPointersAsValues)
@@ -137,6 +148,8 @@ void ConstCorrectnessCheck::check(const MatchFinder::MatchResult &Result) {
             *Variable, *Result.Context, DeclSpec::TQ_const,
             QualifierTarget::Value, QualifierPolicy::Right))
       Diag << *Fix;
+    // FIXME: Add '{}' for default initialization if no user-defined default
+    // constructor exists and there is no initializer.
     return;
   }
 
