@@ -312,6 +312,9 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::UMULFIX:                    return "umulfix";
   case ISD::UMULFIXSAT:                 return "umulfixsat";
 
+  case ISD::SDIVFIX:                    return "sdivfix";
+  case ISD::UDIVFIX:                    return "udivfix";
+
   // Conversion operators.
   case ISD::SIGN_EXTEND:                return "sign_extend";
   case ISD::ZERO_EXTEND:                return "zero_extend";
@@ -477,7 +480,8 @@ static void printMemOperand(raw_ostream &OS, const MachineMemOperand &MMO,
   if (MF)
     MST.incorporateFunction(MF->getFunction());
   SmallVector<StringRef, 0> SSNs;
-  MMO.print(OS, MST, SSNs, Ctx, MFI, TII);
+  MMO.print(OS, MST, SSNs, Ctx, MFI, TII,
+            MF ? MF->getTarget().getMIRFormatter() : nullptr);
 }
 
 static void printMemOperand(raw_ostream &OS, const MachineMemOperand &MMO,
