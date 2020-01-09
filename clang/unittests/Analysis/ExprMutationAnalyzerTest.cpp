@@ -388,25 +388,25 @@ TEST(ExprMutationAnalyzerTest, ByConstRRefArgument) {
   auto Results =
       match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
   EXPECT_THAT(mutatedBy(Results, AST.get()),
-              ElementsAre("static_cast<int&&>(x)"));
+              ElementsAre("static_cast<int &&>(x)"));
 
   AST = buildASTFromCode("struct A {}; A operator+(const A&&, int);"
                          "void f() { A x; static_cast<A&&>(x) + 1; }");
   Results = match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
   EXPECT_THAT(mutatedBy(Results, AST.get()),
-              ElementsAre("static_cast<A&&>(x)"));
+              ElementsAre("static_cast<A &&>(x)"));
 
   AST = buildASTFromCode("void f() { struct A { A(const int&&); }; "
                          "int x; A y(static_cast<int&&>(x)); }");
   Results = match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
   EXPECT_THAT(mutatedBy(Results, AST.get()),
-              ElementsAre("static_cast<int&&>(x)"));
+              ElementsAre("static_cast<int &&>(x)"));
 
   AST = buildASTFromCode("void f() { struct A { A(); A(const A&&); }; "
                          "A x; A y(static_cast<A&&>(x)); }");
   Results = match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
   EXPECT_THAT(mutatedBy(Results, AST.get()),
-              ElementsAre("static_cast<A&&>(x)"));
+              ElementsAre("static_cast<A &&>(x)"));
 }
 
 TEST(ExprMutationAnalyzerTest, Move) {
@@ -576,7 +576,7 @@ TEST(ExprMutationAnalyzerTest, ReturnAsNonConstRRef) {
   const auto Results =
       match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
   EXPECT_THAT(mutatedBy(Results, AST.get()),
-              ElementsAre("return static_cast<int &&>(x);"));
+              ElementsAre("static_cast<int &&>(x)"));
 }
 
 TEST(ExprMutationAnalyzerTest, ReturnAsConstRRef) {
@@ -585,7 +585,7 @@ TEST(ExprMutationAnalyzerTest, ReturnAsConstRRef) {
   const auto Results =
       match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
   EXPECT_THAT(mutatedBy(Results, AST.get()),
-              ElementsAre("return static_cast<int &&>(x);"));
+              ElementsAre("static_cast<int &&>(x)"));
 }
 
 TEST(ExprMutationAnalyzerTest, TakeAddress) {
@@ -861,13 +861,13 @@ TEST(ExprMutationAnalyzerTest, CastToRefModified) {
   auto Results =
       match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
   EXPECT_THAT(mutatedBy(Results, AST.get()),
-              ElementsAre("static_cast<int &>(x) = 10"));
+              ElementsAre("static_cast<int &>(x)"));
 
   AST = buildASTFromCode("typedef int& IntRef;"
                          "void f() { int x; static_cast<IntRef>(x) = 10; }");
   Results = match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
   EXPECT_THAT(mutatedBy(Results, AST.get()),
-              ElementsAre("static_cast<IntRef>(x) = 10"));
+              ElementsAre("static_cast<IntRef>(x)"));
 }
 
 TEST(ExprMutationAnalyzerTest, CastToRefNotModified) {
@@ -876,7 +876,7 @@ TEST(ExprMutationAnalyzerTest, CastToRefNotModified) {
   const auto Results =
       match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
   EXPECT_THAT(mutatedBy(Results, AST.get()),
-              ElementsAre("static_cast<int&>(x)"));
+              ElementsAre("static_cast<int &>(x)"));
 }
 
 TEST(ExprMutationAnalyzerTest, CastToConstRef) {
