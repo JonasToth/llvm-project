@@ -387,22 +387,26 @@ TEST(ExprMutationAnalyzerTest, ByConstRRefArgument) {
       "void g(const int&&); void f() { int x; g(static_cast<int&&>(x)); }");
   auto Results =
       match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
-  EXPECT_FALSE(isMutated(Results, AST.get()));
+  EXPECT_THAT(mutatedBy(Results, AST.get()),
+              ElementsAre("static_cast<int&&>(x)"));
 
   AST = buildASTFromCode("struct A {}; A operator+(const A&&, int);"
                          "void f() { A x; static_cast<A&&>(x) + 1; }");
   Results = match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
-  EXPECT_FALSE(isMutated(Results, AST.get()));
+  EXPECT_THAT(mutatedBy(Results, AST.get()),
+              ElementsAre("static_cast<A&&>(x)"));
 
   AST = buildASTFromCode("void f() { struct A { A(const int&&); }; "
                          "int x; A y(static_cast<int&&>(x)); }");
   Results = match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
-  EXPECT_FALSE(isMutated(Results, AST.get()));
+  EXPECT_THAT(mutatedBy(Results, AST.get()),
+              ElementsAre("static_cast<int&&>(x)"));
 
   AST = buildASTFromCode("void f() { struct A { A(); A(const A&&); }; "
                          "A x; A y(static_cast<A&&>(x)); }");
   Results = match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
-  EXPECT_FALSE(isMutated(Results, AST.get()));
+  EXPECT_THAT(mutatedBy(Results, AST.get()),
+              ElementsAre("static_cast<A&&>(x)"));
 }
 
 TEST(ExprMutationAnalyzerTest, Move) {
@@ -580,7 +584,8 @@ TEST(ExprMutationAnalyzerTest, ReturnAsConstRRef) {
       "const int&& f() { int x; return static_cast<int&&>(x); }");
   const auto Results =
       match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
-  EXPECT_FALSE(isMutated(Results, AST.get()));
+  EXPECT_THAT(mutatedBy(Results, AST.get()),
+              ElementsAre("return static_cast<int &&>(x);"));
 }
 
 TEST(ExprMutationAnalyzerTest, TakeAddress) {
@@ -870,7 +875,8 @@ TEST(ExprMutationAnalyzerTest, CastToRefNotModified) {
       buildASTFromCode("void f() { int x; static_cast<int&>(x); }");
   const auto Results =
       match(withEnclosingCompound(declRefTo("x")), AST->getASTContext());
-  EXPECT_FALSE(isMutated(Results, AST.get()));
+  EXPECT_THAT(mutatedBy(Results, AST.get()),
+              ElementsAre("static_cast<int&>(x)"));
 }
 
 TEST(ExprMutationAnalyzerTest, CastToConstRef) {

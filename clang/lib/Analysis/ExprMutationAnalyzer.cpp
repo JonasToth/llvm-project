@@ -388,7 +388,6 @@ const Stmt *ExprMutationAnalyzer::findArrayElementMutation(const Expr *Exp) {
 }
 
 const Stmt *ExprMutationAnalyzer::findCastMutation(const Expr *Exp) {
-#if 0
   // If the 'Exp' is explicitly casted to a non-const reference type the
   // 'Exp' is considered to be modified.
   const auto ExplicitCast = match(
@@ -401,7 +400,6 @@ const Stmt *ExprMutationAnalyzer::findCastMutation(const Expr *Exp) {
 
   if (const auto *CastStmt = selectFirst<Stmt>("stmt", ExplicitCast))
     return CastStmt;
-#endif
 
   // If 'Exp' is casted to any non-const reference type, check the castExpr.
   const auto Casts = match(
