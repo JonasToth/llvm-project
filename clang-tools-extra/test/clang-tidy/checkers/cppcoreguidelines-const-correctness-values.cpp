@@ -954,12 +954,14 @@ T *return_ptr() { return &return_ref<T>(); }
 
 template <typename T>
 void auto_usage_variants() {
+  // FIXME: Currently all 'auto's that deduce to a reference are not ignored
+  // for the analysis. That results in bad transformations.
   auto auto_val0 = T{};
-  auto &auto_val1 = auto_val0;
+  auto &auto_val1 = auto_val0; // Bad
   auto *auto_val2 = &auto_val0;
 
-  auto auto_ref0 = return_ref<T>();
-  auto &auto_ref1 = return_ref<T>();
+  auto auto_ref0 = return_ref<T>();  // Bad
+  auto &auto_ref1 = return_ref<T>(); // Bad
   auto *auto_ref2 = return_ptr<T>();
 
   auto auto_ptr0 = return_ptr<T>();
@@ -968,7 +970,7 @@ void auto_usage_variants() {
 
   using MyTypedef = T;
   auto auto_td0 = MyTypedef{};
-  auto &auto_td1 = auto_td0;
+  auto &auto_td1 = auto_td0; // Bad
   auto *auto_td2 = &auto_td0;
 }
 void instantiate_auto_cases() {
