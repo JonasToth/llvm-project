@@ -58,6 +58,11 @@ void nested_scopes() {
   }
 }
 
+void ignore_reference_to_pointers() {
+  int *np_local0 = nullptr;
+  int *&np_local1 = np_local0;
+}
+
 void some_lambda_environment_capture_all_by_reference(double np_arg0) {
   int np_local0 = 0;
   int p_local0 = 1;
