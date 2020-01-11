@@ -30,6 +30,7 @@ AST_MATCHER_P(DeclStmt, containsDeclaration2,
 AST_MATCHER(ReferenceType, isSpelledAsLValue) {
   return Node.isSpelledAsLValue();
 }
+AST_MATCHER(Type, isDependentType) { return Node.isDependentType(); }
 } // namespace
 
 void ConstCorrectnessCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
@@ -50,7 +51,7 @@ void ConstCorrectnessCheck::registerMatchers(MatchFinder *Finder) {
 
   const auto TemplateType = anyOf(
       hasType(hasCanonicalType(templateTypeParmType())),
-      hasType(substTemplateTypeParmType()),
+      hasType(substTemplateTypeParmType()), hasType(isDependentType()),
       // References to template types, their substitutions or typedefs to
       // template types need to be considered as well.
       hasType(referenceType(pointee(hasCanonicalType(templateTypeParmType())))),
@@ -158,12 +159,6 @@ void ConstCorrectnessCheck::check(const MatchFinder::MatchResult &Result) {
       if (Optional<FixItHint> Fix = addQualifierToVarDecl(
               *Variable, *Result.Context, DeclSpec::TQ_const,
               QualifierTarget::Value, QualifierPolicy::Right))
-        Diag << *Fix;
-    }
-    if (TransformPointees) {
-      if (Optional<FixItHint> Fix = addQualifierToVarDecl(
-              *Variable, *Result.Context, DeclSpec::TQ_const,
-              QualifierTarget::Pointee, QualifierPolicy::Right))
         Diag << *Fix;
     }
     return;

@@ -905,7 +905,6 @@ template <typename T>
 void list_init_template() {
   T np_local0{};
   ref_pair<T, T> p_local0 = {np_local0, np_local0};
-  // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 'p_local0' of type 'ref_pair<T, T>' can be declared 'const'
 }
 void cast_in_class_hierarchy() {
   derived np_local0;
