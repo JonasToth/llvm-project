@@ -922,28 +922,6 @@ void func_references() {
 }
 
 #if 0
-struct my_class {
-  void method_takes_ref(base &r) { (void)r; }
-  void call_through_lambda_this() {
-    derived np_local0{};
-    auto my_lambda = [this](base &arg) { return method_takes_ref(arg); };
-    my_lambda(np_local0);
-  }
-};
-
-struct my_class_operator {
-  bool operator==(const my_class_operator &otha) {
-    return true;
-  }
-};
-void false_postive_overloaded_operator() {
-  my_class_operator f0{};
-  my_class_operator const f1{};
-  my_class_operator &f_ref = f0;
-  f0 == f1;
-}
-#endif
-
 template <typename T>
 T &return_ref() {
   static T global;
@@ -977,3 +955,4 @@ void instantiate_auto_cases() {
   auto_usage_variants<int>();
   auto_usage_variants<System>();
 }
+#endif

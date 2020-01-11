@@ -39,8 +39,6 @@ void ConstCorrectnessCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
 
   Options.store(Opts, "TransformValues", TransformValues);
   Options.store(Opts, "TransformReferences", TransformReferences);
-  // FIXME: Pointee analysis is not implemented yet.
-  // Options.store(Opts, "TransformPointees", TransformPointees);
   Options.store(Opts, "TransformPointersAsValues", TransformPointersAsValues);
 }
 
@@ -52,14 +50,7 @@ void ConstCorrectnessCheck::registerMatchers(MatchFinder *Finder) {
 
   const auto TemplateType = anyOf(
       hasType(hasCanonicalType(templateTypeParmType())),
-      hasType(/*FIXME: Why is this not working?:  hasCanonicalType(*/
-              substTemplateTypeParmType()) /*)*/,
-      // Matches when 'auto' deduced to a template type or a substituted
-      // template type.
-      allOf(anyOf(hasType(autoType()),
-                  hasType(referenceType(pointee(autoType()))),
-                  hasType(pointerType(pointee(autoType())))),
-            hasInitializer(isInstantiationDependent())),
+      hasType(substTemplateTypeParmType()),
       // References to template types, their substitutions or typedefs to
       // template types need to be considered as well.
       hasType(referenceType(pointee(hasCanonicalType(templateTypeParmType())))),
@@ -68,7 +59,7 @@ void ConstCorrectnessCheck::registerMatchers(MatchFinder *Finder) {
   const auto AutoTemplateType = varDecl(
       anyOf(hasType(autoType()), hasType(referenceType(pointee(autoType()))),
             hasType(pointerType(pointee(autoType())))),
-      hasInitializer(isTypeDependent()));
+      hasInitializer(isInstantiationDependent()));
 
   const auto FunctionPointerRef =
       hasType(hasCanonicalType(referenceType(pointee(functionType()))));
@@ -146,10 +137,11 @@ void ConstCorrectnessCheck::check(const MatchFinder::MatchResult &Result) {
   if (VC == VariableCategory::Value && TransformValues) {
     if (Optional<FixItHint> Fix = addQualifierToVarDecl(
             *Variable, *Result.Context, DeclSpec::TQ_const,
-            QualifierTarget::Value, QualifierPolicy::Right))
+            QualifierTarget::Value, QualifierPolicy::Right)) {
       Diag << *Fix;
-    // FIXME: Add '{}' for default initialization if no user-defined default
-    // constructor exists and there is no initializer.
+      // FIXME: Add '{}' for default initialization if no user-defined default
+      // constructor exists and there is no initializer.
+    }
     return;
   }
 

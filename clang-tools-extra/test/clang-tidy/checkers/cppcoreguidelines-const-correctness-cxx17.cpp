@@ -29,3 +29,21 @@ void g() {
   int p_local0 = 42;
   // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'int' can be declared 'const'
 }
+
+template <typename SomeValue>
+struct DoGooder {
+  DoGooder(void *accessor, SomeValue value) {
+  }
+};
+struct Bingus {
+  static constexpr auto someRandomConstant = 99;
+};
+template <typename Foo>
+struct HardWorker {
+  HardWorker() {
+    const DoGooder<int> anInstanceOf(nullptr, Foo::someRandomConstant);
+  }
+};
+struct TheContainer {
+  HardWorker<Bingus> m_theOtherInstance;
+};
