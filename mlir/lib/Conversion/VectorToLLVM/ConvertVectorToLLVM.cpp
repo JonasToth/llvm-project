@@ -1,6 +1,6 @@
 //===- VectorToLLVM.cpp - Conversion from Vector to the LLVM dialect ------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -123,6 +123,7 @@ static SmallVector<int64_t, 4> getI64SubArray(ArrayAttr arrayAttr,
   return res;
 }
 
+namespace {
 class VectorBroadcastOpConversion : public LLVMOpLowering {
 public:
   explicit VectorBroadcastOpConversion(MLIRContext *context,
@@ -157,7 +158,7 @@ private:
   // TODO(ajcbik): consider replacing this one-pattern lowering
   //               with a two-pattern lowering using other vector
   //               ops once all insert/extract/shuffle operations
-  //               are available with lowering implemention.
+  //               are available with lowering implementation.
   //
   Value expandRanks(Value value, Location loc, VectorType srcVectorType,
                     VectorType dstVectorType,
@@ -947,6 +948,8 @@ public:
     return matchSuccess();
   }
 };
+
+} // namespace
 
 /// Populate the given list with patterns that convert from Vector to LLVM.
 void mlir::populateVectorToLLVMConversionPatterns(

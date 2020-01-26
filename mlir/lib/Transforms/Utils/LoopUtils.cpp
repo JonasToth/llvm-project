@@ -1,6 +1,6 @@
 //===- LoopUtils.cpp ---- Misc utilities for loop transformation ----------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -351,7 +351,7 @@ LogicalResult mlir::instBodySkew(AffineForOp forOp, ArrayRef<uint64_t> shifts,
 // in the parent loop.  Collect at most `maxLoops` loops and append them to
 // `forOps`.
 template <typename T>
-void getPerfectlyNestedLoopsImpl(
+static void getPerfectlyNestedLoopsImpl(
     SmallVectorImpl<T> &forOps, T rootForOp,
     unsigned maxLoops = std::numeric_limits<unsigned>::max()) {
   for (unsigned i = 0; i < maxLoops; ++i) {

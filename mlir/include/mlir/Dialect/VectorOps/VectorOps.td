@@ -1,6 +1,6 @@
 //===- VectorOps.td - Vector op definitions ---------------*- tablegen -*-====//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -228,7 +228,7 @@ def Vector_ShuffleOp :
               v2 : <t_1 x t_2 x .. x t_k x type>
       we have s_i = t_i for all 1 < i <= k
     * the mask length equals the leading dimension size of the result
-    * numbering the input vector indices left to right accross the operands, all
+    * numbering the input vector indices left to right across the operands, all
       mask values must be within range, viz. given two k-D operands v1 and v2
       above, all mask values are in the range [0,s_1+t_1)
 
@@ -495,10 +495,10 @@ def Vector_InsertStridedSliceOp :
     Results<(outs AnyVector)> {
   let summary = "strided_slice operation";
   let description = [{
-    Takes a k-D source vector, an n-D destination vector (n >= k), n-D `offsets`
-    integer array attribute, a k-D `strides` integer array attribute and inserts
-    the k-D source vector as a strided subvector at the proper offset into the
-    n-D destination vector.
+    Takes a k-D source vector, an n-D destination vector (n >= k), n-sized
+    `offsets` integer array attribute, a k-sized `strides` integer array attribute
+    and inserts the k-D source vector as a strided subvector at the proper offset
+    into the n-D destination vector.
 
     At the moment strides must contain only 1s.
 
@@ -509,7 +509,7 @@ def Vector_InsertStridedSliceOp :
     Examples:
     ```
       %2 = vector.insert_strided_slice %0, %1
-          {offsets : [0, 0, 2], strides : [1, 1]}:
+          {offsets = [0, 0, 2], strides = [1, 1]}:
         vector<2x4xf32> into vector<16x4x8xf32>
     ```
   }];
@@ -693,9 +693,9 @@ def Vector_StridedSliceOp :
     Results<(outs AnyVector)> {
   let summary = "strided_slice operation";
   let description = [{
-    Takes an n-D vector, k-D `offsets` integer array attribute, a k-D `sizes`
-    integer array attribute, a k-D `strides` integer array attribute and
-    extracts the n-D subvector at the proper offset.
+    Takes an n-D vector, k-D `offsets` integer array attribute, a k-sized
+    `sizes` integer array attribute, a k-sized `strides` integer array
+    attribute and extracts the n-D subvector at the proper offset.
 
     At the moment strides must contain only 1s.
     // TODO(ntv) support non-1 strides.
@@ -707,7 +707,7 @@ def Vector_StridedSliceOp :
     Examples:
     ```
       %1 = vector.strided_slice %0
-          {offsets : [0, 2], sizes : [2, 4], strides : [1, 1]}:
+          {offsets = [0, 2], sizes = [2, 4], strides = [1, 1]}:
         vector<4x8x16xf32> to vector<2x4x16xf32>
     ```
 
@@ -742,9 +742,9 @@ def Vector_TransferReadOp :
     a [MemRef](../LangRef.md#memref-type) supplied as its first operand
     into a [vector](../LangRef.md#vector-type) of the same base elemental type.
 
-    A vector memref operand must have its vector element type match a suffix
-    (shape and element type) of the vector (e.g. memref<3x2x6x4x3xf32>,
-    vector<1x1x4x3xf32>).
+    A memref operand with vector element type, must have its vector element
+    type match a suffix (shape and element type) of the vector (e.g.
+    memref<3x2x6x4x3xf32>, vector<1x1x4x3xf32>).
 
     The slice is further defined by a full-rank index within the MemRef,
     supplied as the operands `2 .. 1 + rank(memref)`. The permutation_map
@@ -1115,6 +1115,7 @@ def Vector_TupleGetOp :
     }
     static StringRef getIndexAttrName() { return "index"; }
   }];
+  let hasFolder = 1;
 }
 
 def Vector_PrintOp :

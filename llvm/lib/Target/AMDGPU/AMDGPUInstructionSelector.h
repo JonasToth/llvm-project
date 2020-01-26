@@ -80,6 +80,8 @@ private:
   MachineOperand getSubOperand64(MachineOperand &MO,
                                  const TargetRegisterClass &SubRC,
                                  unsigned SubIdx) const;
+
+  bool constrainCopyLikeIntrin(MachineInstr &MI, unsigned NewOpc) const;
   bool selectCOPY(MachineInstr &I) const;
   bool selectPHI(MachineInstr &I) const;
   bool selectG_TRUNC(MachineInstr &I) const;
@@ -94,12 +96,18 @@ private:
   bool selectG_PTR_ADD(MachineInstr &I) const;
   bool selectG_IMPLICIT_DEF(MachineInstr &I) const;
   bool selectG_INSERT(MachineInstr &I) const;
+
+  bool selectInterpP1F16(MachineInstr &MI) const;
   bool selectG_INTRINSIC(MachineInstr &I) const;
 
   std::tuple<Register, unsigned, unsigned>
   splitBufferOffsets(MachineIRBuilder &B, Register OrigOffset) const;
 
+  bool selectEndCfIntrinsic(MachineInstr &MI) const;
   bool selectStoreIntrinsic(MachineInstr &MI, bool IsFormat) const;
+  bool selectDSOrderedIntrinsic(MachineInstr &MI, Intrinsic::ID IID) const;
+  bool selectDSGWSIntrinsic(MachineInstr &MI, Intrinsic::ID IID) const;
+  bool selectDSAppendConsume(MachineInstr &MI, bool IsAppend) const;
 
   bool selectG_INTRINSIC_W_SIDE_EFFECTS(MachineInstr &I) const;
   int getS_CMPOpcode(CmpInst::Predicate P, unsigned Size) const;
@@ -117,6 +125,7 @@ private:
   bool selectG_FRAME_INDEX(MachineInstr &I) const;
   bool selectG_PTR_MASK(MachineInstr &I) const;
   bool selectG_EXTRACT_VECTOR_ELT(MachineInstr &I) const;
+  bool selectG_INSERT_VECTOR_ELT(MachineInstr &I) const;
 
   std::pair<Register, unsigned>
   selectVOP3ModsImpl(Register Src) const;
@@ -162,9 +171,11 @@ private:
   InstructionSelector::ComplexRendererFns
   selectMUBUFScratchOffset(MachineOperand &Root) const;
 
-  bool isDSOffsetLegal(const MachineRegisterInfo &MRI,
-                       const MachineOperand &Base,
-                       int64_t Offset, unsigned OffsetBits) const;
+  bool isDSOffsetLegal(Register Base, int64_t Offset,
+                       unsigned OffsetBits) const;
+
+  std::pair<Register, unsigned>
+  selectDS1Addr1OffsetImpl(MachineOperand &Src) const;
 
   InstructionSelector::ComplexRendererFns
   selectDS1Addr1Offset(MachineOperand &Root) const;
@@ -172,8 +183,12 @@ private:
   void renderTruncImm32(MachineInstrBuilder &MIB, const MachineInstr &MI,
                         int OpIdx = -1) const;
 
-  void renderTruncTImm(MachineInstrBuilder &MIB, const MachineInstr &MI,
-                       int OpIdx) const;
+  void renderTruncTImm32(MachineInstrBuilder &MIB, const MachineInstr &MI,
+                         int OpIdx) const;
+  void renderTruncTImm16(MachineInstrBuilder &MIB, const MachineInstr &MI,
+                         int OpIdx) const;
+  void renderTruncTImm1(MachineInstrBuilder &MIB, const MachineInstr &MI,
+                        int OpIdx) const;
 
   void renderNegateImm(MachineInstrBuilder &MIB, const MachineInstr &MI,
                        int OpIdx) const;

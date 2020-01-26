@@ -37,8 +37,10 @@ using namespace PatternMatch;
 
 #define DEBUG_TYPE "lower-matrix-intrinsics"
 
-static cl::opt<bool> EnableShapePropagation("matrix-propagate-shape",
-                                            cl::init(true));
+static cl::opt<bool> EnableShapePropagation(
+    "matrix-propagate-shape", cl::init(true), cl::Hidden,
+    cl::desc("Enable/disable shape propagation from matrix intrinsics to other "
+             "instructions."));
 
 static cl::opt<bool> AllowContractEnabled(
     "matrix-allow-contract", cl::init(false), cl::Hidden,
@@ -521,8 +523,8 @@ public:
 
   StoreInst *createColumnStore(Value *ColumnValue, Value *ColumnPtr,
                                Type *EltType, IRBuilder<> Builder) {
-    unsigned Align = DL.getABITypeAlignment(EltType);
-    return Builder.CreateAlignedStore(ColumnValue, ColumnPtr, Align);
+    return Builder.CreateAlignedStore(ColumnValue, ColumnPtr,
+                                      DL.getABITypeAlign(EltType));
   }
 
 

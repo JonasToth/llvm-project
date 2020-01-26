@@ -1,6 +1,6 @@
 //===- RegionUtils.cpp - Region-related transformation utilities ----------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -320,8 +320,6 @@ static LogicalResult deleteDeadness(MutableArrayRef<Region> regions,
 // This function returns success if any operations or arguments were deleted,
 // failure otherwise.
 static LogicalResult runRegionDCE(MutableArrayRef<Region> regions) {
-  assert(regions.size() == 1);
-
   LiveMap liveMap;
   do {
     liveMap.resetChanged();

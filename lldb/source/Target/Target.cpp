@@ -1,4 +1,4 @@
-//===-- Target.cpp ----------------------------------------------*- C++ -*-===//
+//===-- Target.cpp --------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -27,6 +27,7 @@
 #include "lldb/Core/StreamFile.h"
 #include "lldb/Core/StructuredDataImpl.h"
 #include "lldb/Core/ValueObject.h"
+#include "lldb/Expression/ExpressionVariable.h"
 #include "lldb/Expression/REPL.h"
 #include "lldb/Expression/UserExpression.h"
 #include "lldb/Host/Host.h"
@@ -36,7 +37,6 @@
 #include "lldb/Interpreter/OptionGroupWatchpoint.h"
 #include "lldb/Interpreter/OptionValues.h"
 #include "lldb/Interpreter/Property.h"
-#include "lldb/Symbol/ClangASTContext.h"
 #include "lldb/Symbol/ClangASTImporter.h"
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/ObjectFile.h"
@@ -2691,8 +2691,10 @@ Status Target::Install(ProcessLaunchInfo *launch_info) {
   if (platform_sp) {
     if (platform_sp->IsRemote()) {
       if (platform_sp->IsConnected()) {
-        // Install all files that have an install path, and always install the
-        // main executable when connected to a remote platform
+        // Install all files that have an install path when connected to a
+        // remote platform. If target.auto-install-main-executable is set then
+        // also install the main executable even if it does not have an explicit
+        // install path specified.
         const ModuleList &modules = GetImages();
         const size_t num_images = modules.GetSize();
         for (size_t idx = 0; idx < num_images; ++idx) {
@@ -2703,10 +2705,8 @@ Status Target::Install(ProcessLaunchInfo *launch_info) {
             if (local_file) {
               FileSpec remote_file(module_sp->GetRemoteInstallFileSpec());
               if (!remote_file) {
-                if (is_main_executable) // TODO: add setting for always
-                                        // installing main executable???
-                {
-                  // Always install the main executable
+                if (is_main_executable && GetAutoInstallMainExecutable()) {
+                  // Automatically install the main executable.
                   remote_file = platform_sp->GetRemoteWorkingDirectory();
                   remote_file.AppendPathComponent(
                       module_sp->GetFileSpec().GetFilename().GetCString());
@@ -3968,6 +3968,12 @@ bool TargetProperties::GetRequireHardwareBreakpoints() const {
 void TargetProperties::SetRequireHardwareBreakpoints(bool b) {
   const uint32_t idx = ePropertyRequireHardwareBreakpoints;
   m_collection_sp->SetPropertyAtIndexAsBoolean(nullptr, idx, b);
+}
+
+bool TargetProperties::GetAutoInstallMainExecutable() const {
+  const uint32_t idx = ePropertyAutoInstallMainExecutable;
+  return m_collection_sp->GetPropertyAtIndexAsBoolean(
+      nullptr, idx, g_target_properties[idx].default_uint_value != 0);
 }
 
 void TargetProperties::Arg0ValueChangedCallback() {

@@ -1,6 +1,6 @@
 //===- InliningUtils.cpp ---- Misc utilities for inlining -----------------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -284,7 +284,7 @@ LogicalResult mlir::inlineCall(InlinerInterface &interface,
   if (src->empty())
     return failure();
   auto *entryBlock = &src->front();
-  ArrayRef<Type> callableResultTypes = callable.getCallableResults(src);
+  ArrayRef<Type> callableResultTypes = callable.getCallableResults();
 
   // Make sure that the number of arguments and results matchup between the call
   // and the region.

@@ -65,6 +65,7 @@ Clang-Tidy Checks
    `bugprone-macro-parentheses <bugprone-macro-parentheses.html>`_, "Yes"
    `bugprone-macro-repeated-side-effects <bugprone-macro-repeated-side-effects.html>`_,
    `bugprone-misplaced-operator-in-strlen-in-alloc <bugprone-misplaced-operator-in-strlen-in-alloc.html>`_, "Yes"
+   `bugprone-misplaced-pointer-arithmetic-in-alloc <bugprone-misplaced-pointer-arithmetic-in-alloc.html>`_, "Yes"
    `bugprone-misplaced-widening-cast <bugprone-misplaced-widening-cast.html>`_,
    `bugprone-move-forwarding-reference <bugprone-move-forwarding-reference.html>`_, "Yes"
    `bugprone-multiple-statement-macro <bugprone-multiple-statement-macro.html>`_,
@@ -105,6 +106,7 @@ Clang-Tidy Checks
    `cert-mem57-cpp <cert-mem57-cpp.html>`_,
    `cert-msc50-cpp <cert-msc50-cpp.html>`_,
    `cert-msc51-cpp <cert-msc51-cpp.html>`_,
+   `cert-oop57-cpp <cert-oop57-cpp.html>`_,
    `cert-oop58-cpp <cert-oop58-cpp.html>`_,
    `clang-analyzer-core.DynamicTypePropagation <clang-analyzer-core.DynamicTypePropagation.html>`_,
    `clang-analyzer-core.uninitialized.CapturedBlockVariable <clang-analyzer-core.uninitialized.CapturedBlockVariable.html>`_,
@@ -270,6 +272,7 @@ Clang-Tidy Checks
    `readability-misplaced-array-index <readability-misplaced-array-index.html>`_, "Yes"
    `readability-named-parameter <readability-named-parameter.html>`_, "Yes"
    `readability-non-const-parameter <readability-non-const-parameter.html>`_, "Yes"
+   `readability-qualified-auto <readability-qualified-auto.html>`_, "Yes"
    `readability-redundant-access-specifiers <readability-redundant-access-specifiers.html>`_, "Yes"
    `readability-redundant-control-flow <readability-redundant-control-flow.html>`_, "Yes"
    `readability-redundant-declaration <readability-redundant-declaration.html>`_, "Yes"
@@ -402,3 +405,4 @@ Clang-Tidy Checks
    `hicpp-use-nullptr <hicpp-use-nullptr.html>`_, `modernize-use-nullptr <modernize-use-nullptr.html>`_, "Yes"
    `hicpp-use-override <hicpp-use-override.html>`_, `modernize-use-override <modernize-use-override.html>`_, "Yes"
    `hicpp-vararg <hicpp-vararg.html>`_, `cppcoreguidelines-pro-type-vararg <cppcoreguidelines-pro-type-vararg.html>`_,
+   `llvm-qualified-auto <llvm-qualified-auto.html>`_, `readability-qualified-auto <readability-qualified-auto.html>`_, "Yes"

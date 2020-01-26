@@ -1,6 +1,6 @@
 //===- Utils.cpp ---- Misc utilities for analysis -------------------------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -471,8 +471,8 @@ static Operation *getInstAtPosition(ArrayRef<unsigned> positions,
 }
 
 // Adds loop IV bounds to 'cst' for loop IVs not found in 'ivs'.
-LogicalResult addMissingLoopIVBounds(SmallPtrSet<Value, 8> &ivs,
-                                     FlatAffineConstraints *cst) {
+static LogicalResult addMissingLoopIVBounds(SmallPtrSet<Value, 8> &ivs,
+                                            FlatAffineConstraints *cst) {
   for (unsigned i = 0, e = cst->getNumDimIds(); i < e; ++i) {
     auto value = cst->getIdValue(i);
     if (ivs.count(value) == 0) {

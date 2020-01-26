@@ -1,6 +1,6 @@
 //===- LinalgToLLVM.cpp - conversion from Linalg to LLVM dialect ----------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -139,7 +139,6 @@ private:
 
   MemRefDescriptor d;
 };
-} // namespace
 
 // RangeOp creates a new range descriptor.
 class RangeOpConversion : public LLVMOpLowering {
@@ -364,6 +363,7 @@ public:
     return matchSuccess();
   }
 };
+} // namespace
 
 template <typename LinalgOp>
 static SmallVector<Type, 4> ExtractOperandTypes(Operation *op) {
@@ -426,6 +426,8 @@ Type LinalgTypeConverter::convertType(Type t) {
     return result;
   return convertLinalgType(t, *this);
 }
+
+namespace {
 
 // LinalgOpConversion<LinalgOp> creates a new call to the
 // `LinalgOp::getLibraryCallName()` function.
@@ -552,6 +554,8 @@ populateLinalgToStandardConversionPatterns(OwningRewritePatternList &patterns,
       ctx);
 }
 
+} // namespace
+
 /// Populate the given list with patterns that convert from Linalg to LLVM.
 void mlir::populateLinalgToLLVMConversionPatterns(
     LinalgTypeConverter &converter, OwningRewritePatternList &patterns,
@@ -588,8 +592,7 @@ void ConvertLinalgToLLVMPass::runOnModule() {
     signalPassFailure();
 }
 
-std::unique_ptr<OpPassBase<ModuleOp>>
-mlir::linalg::createConvertLinalgToLLVMPass() {
+std::unique_ptr<OpPassBase<ModuleOp>> mlir::createConvertLinalgToLLVMPass() {
   return std::make_unique<ConvertLinalgToLLVMPass>();
 }
 

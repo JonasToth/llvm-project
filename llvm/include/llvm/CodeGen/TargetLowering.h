@@ -284,6 +284,20 @@ public:
     return getPointerTy(DL);
   }
 
+  /// This callback is used to inspect load/store instructions and add
+  /// target-specific MachineMemOperand flags to them.  The default
+  /// implementation does nothing.
+  virtual MachineMemOperand::Flags getTargetMMOFlags(const Instruction &I) const {
+    return MachineMemOperand::MONone;
+  }
+
+  MachineMemOperand::Flags getLoadMemOperandFlags(const LoadInst &LI,
+                                                  const DataLayout &DL) const;
+  MachineMemOperand::Flags getStoreMemOperandFlags(const StoreInst &SI,
+                                                   const DataLayout &DL) const;
+  MachineMemOperand::Flags getAtomicMemOperandFlags(const Instruction &AI,
+                                                    const DataLayout &DL) const;
+
   virtual bool isSelectSupported(SelectSupportKind /*kind*/) const {
     return true;
   }
@@ -850,7 +864,7 @@ public:
     int          offset = 0;       // offset off of ptrVal
     uint64_t     size = 0;         // the size of the memory location
                                    // (taken from memVT if zero)
-    MaybeAlign align = Align::None(); // alignment
+    MaybeAlign align = Align(1);   // alignment
 
     MachineMemOperand::Flags flags = MachineMemOperand::MONone;
     IntrinsicInfo() = default;
@@ -3761,13 +3775,6 @@ public:
   virtual SDValue prepareVolatileOrAtomicLoad(SDValue Chain, const SDLoc &DL,
                                               SelectionDAG &DAG) const {
     return Chain;
-  }
-
-  /// This callback is used to inspect load/store instructions and add
-  /// target-specific MachineMemOperand flags to them.  The default
-  /// implementation does nothing.
-  virtual MachineMemOperand::Flags getMMOFlags(const Instruction &I) const {
-    return MachineMemOperand::MONone;
   }
 
   /// Should SelectionDAG lower an atomic store of the given kind as a normal

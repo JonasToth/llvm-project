@@ -85,14 +85,22 @@ cl::opt<unsigned> X86AlignBranchBoundary(
 
 cl::opt<X86AlignBranchKind, true, cl::parser<std::string>> X86AlignBranch(
     "x86-align-branch",
-    cl::desc("Specify types of branches to align (plus separated list of "
-             "types). The branches's types are combination of jcc, fused, "
-             "jmp, call, ret, indirect."),
-    cl::value_desc("jcc indicates conditional jumps, fused indicates fused "
-                   "conditional jumps, jmp indicates unconditional jumps, call "
-                   "indicates direct and indirect calls, ret indicates rets, "
-                   "indirect indicates indirect jumps."),
+    cl::desc(
+        "Specify types of branches to align. The branches's types are "
+        "combination of jcc, fused, jmp, call, ret, indirect. jcc indicates "
+        "conditional jumps, fused indicates fused conditional jumps, jmp "
+        "indicates unconditional jumps, call indicates direct and indirect "
+        "calls, ret indicates rets, indirect indicates indirect jumps."),
+    cl::value_desc("(plus separated list of types)"),
     cl::location(X86AlignBranchKindLoc));
+
+cl::opt<bool> X86AlignBranchWithin32BBoundaries(
+    "x86-branches-within-32B-boundaries", cl::init(false),
+    cl::desc(
+        "Align selected instructions to mitigate negative performance impact "
+        "of Intel's micro code update for errata skx102.  May break "
+        "assumptions about labels corresponding to particular instructions, "
+        "and should be used with caution."));
 
 class X86ELFObjectWriter : public MCELFObjectTargetWriter {
 public:
@@ -119,8 +127,21 @@ public:
   X86AsmBackend(const Target &T, const MCSubtargetInfo &STI)
       : MCAsmBackend(support::little), STI(STI),
         MCII(T.createMCInstrInfo()) {
-    AlignBoundary = assumeAligned(X86AlignBranchBoundary);
-    AlignBranchType = X86AlignBranchKindLoc;
+    if (X86AlignBranchWithin32BBoundaries) {
+      // At the moment, this defaults to aligning fused branches, unconditional
+      // jumps, and (unfused) conditional jumps with nops.  Both the
+      // instructions aligned and the alignment method (nop vs prefix) may
+      // change in the future.
+      AlignBoundary = assumeAligned(32);;
+      AlignBranchType.addKind(X86::AlignBranchFused);
+      AlignBranchType.addKind(X86::AlignBranchJcc);
+      AlignBranchType.addKind(X86::AlignBranchJmp);
+    }
+    // Allow overriding defaults set by master flag
+    if (X86AlignBranchBoundary.getNumOccurrences())
+      AlignBoundary = assumeAligned(X86AlignBranchBoundary);
+    if (X86AlignBranch.getNumOccurrences())
+      AlignBranchType = X86AlignBranchKindLoc;
   }
 
   bool allowAutoPadding() const override;
@@ -334,8 +355,7 @@ static bool hasVariantSymbol(const MCInst &MI) {
 }
 
 bool X86AsmBackend::allowAutoPadding() const {
-  return (AlignBoundary != Align::None() &&
-          AlignBranchType != X86::AlignBranchNone);
+  return (AlignBoundary != Align(1) && AlignBranchType != X86::AlignBranchNone);
 }
 
 bool X86AsmBackend::needAlign(MCObjectStreamer &OS) const {

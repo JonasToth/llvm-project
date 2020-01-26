@@ -1848,6 +1848,8 @@ Decl *TemplateDeclInstantiator::VisitFunctionDecl(
   // FIXME: Concepts: Do not substitute into constraint expressions
   Expr *TrailingRequiresClause = D->getTrailingRequiresClause();
   if (TrailingRequiresClause) {
+    EnterExpressionEvaluationContext ConstantEvaluated(
+        SemaRef, Sema::ExpressionEvaluationContext::Unevaluated);
     ExprResult SubstRC = SemaRef.SubstExpr(TrailingRequiresClause,
                                            TemplateArgs);
     if (SubstRC.isInvalid())
@@ -2186,6 +2188,8 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
   // FIXME: Concepts: Do not substitute into constraint expressions
   Expr *TrailingRequiresClause = D->getTrailingRequiresClause();
   if (TrailingRequiresClause) {
+    EnterExpressionEvaluationContext ConstantEvaluated(
+        SemaRef, Sema::ExpressionEvaluationContext::Unevaluated);
     ExprResult SubstRC = SemaRef.SubstExpr(TrailingRequiresClause,
                                            TemplateArgs);
     if (SubstRC.isInvalid())
@@ -2479,13 +2483,68 @@ Decl *TemplateDeclInstantiator::VisitTemplateTypeParmDecl(
   // TODO: don't always clone when decls are refcounted.
   assert(D->getTypeForDecl()->isTemplateTypeParmType());
 
+  Optional<unsigned> NumExpanded;
+
+  if (const TypeConstraint *TC = D->getTypeConstraint()) {
+    if (D->isPackExpansion() && !D->isExpandedParameterPack()) {
+      assert(TC->getTemplateArgsAsWritten() &&
+             "type parameter can only be an expansion when explicit arguments "
+             "are specified");
+      // The template type parameter pack's type is a pack expansion of types.
+      // Determine whether we need to expand this parameter pack into separate
+      // types.
+      SmallVector<UnexpandedParameterPack, 2> Unexpanded;
+      for (auto &ArgLoc : TC->getTemplateArgsAsWritten()->arguments())
+        SemaRef.collectUnexpandedParameterPacks(ArgLoc, Unexpanded);
+
+      // Determine whether the set of unexpanded parameter packs can and should
+      // be expanded.
+      bool Expand = true;
+      bool RetainExpansion = false;
+      if (SemaRef.CheckParameterPacksForExpansion(
+              cast<CXXFoldExpr>(TC->getImmediatelyDeclaredConstraint())
+                  ->getEllipsisLoc(),
+              SourceRange(TC->getConceptNameLoc(),
+                          TC->hasExplicitTemplateArgs() ?
+                          TC->getTemplateArgsAsWritten()->getRAngleLoc() :
+                          TC->getConceptNameInfo().getEndLoc()),
+              Unexpanded, TemplateArgs, Expand, RetainExpansion, NumExpanded))
+        return nullptr;
+    }
+  }
+
   TemplateTypeParmDecl *Inst = TemplateTypeParmDecl::Create(
       SemaRef.Context, Owner, D->getBeginLoc(), D->getLocation(),
       D->getDepth() - TemplateArgs.getNumSubstitutedLevels(), D->getIndex(),
-      D->getIdentifier(), D->wasDeclaredWithTypename(), D->isParameterPack());
+      D->getIdentifier(), D->wasDeclaredWithTypename(), D->isParameterPack(),
+      D->hasTypeConstraint(), NumExpanded);
+
   Inst->setAccess(AS_public);
   Inst->setImplicit(D->isImplicit());
+  if (auto *TC = D->getTypeConstraint()) {
+    // TODO: Concepts: do not instantiate the constraint (delayed constraint
+    // substitution)
+    const ASTTemplateArgumentListInfo *TemplArgInfo
+      = TC->getTemplateArgsAsWritten();
+    TemplateArgumentListInfo InstArgs;
 
+    if (TemplArgInfo) {
+      InstArgs.setLAngleLoc(TemplArgInfo->LAngleLoc);
+      InstArgs.setRAngleLoc(TemplArgInfo->RAngleLoc);
+      if (SemaRef.Subst(TemplArgInfo->getTemplateArgs(),
+                        TemplArgInfo->NumTemplateArgs,
+                        InstArgs, TemplateArgs))
+        return nullptr;
+    }
+    if (SemaRef.AttachTypeConstraint(
+            TC->getNestedNameSpecifierLoc(), TC->getConceptNameInfo(),
+            TC->getNamedConcept(), &InstArgs, Inst,
+            D->isParameterPack()
+                ? cast<CXXFoldExpr>(TC->getImmediatelyDeclaredConstraint())
+                    ->getEllipsisLoc()
+                : SourceLocation()))
+      return nullptr;
+  }
   if (D->hasDefaultArgument() && !D->defaultArgumentWasInherited()) {
     TypeSourceInfo *InstantiatedDefaultArg =
         SemaRef.SubstType(D->getDefaultArgumentInfo(), TemplateArgs,
@@ -2629,6 +2688,16 @@ Decl *TemplateDeclInstantiator::VisitNonTypeTemplateParmDecl(
         SemaRef.Context, Owner, D->getInnerLocStart(), D->getLocation(),
         D->getDepth() - TemplateArgs.getNumSubstitutedLevels(),
         D->getPosition(), D->getIdentifier(), T, D->isParameterPack(), DI);
+
+  if (AutoTypeLoc AutoLoc = DI->getTypeLoc().getContainedAutoTypeLoc())
+    if (AutoLoc.isConstrained())
+      if (SemaRef.AttachTypeConstraint(
+              AutoLoc, Param,
+              IsExpandedParameterPack
+                ? DI->getTypeLoc().getAs<PackExpansionTypeLoc>()
+                    .getEllipsisLoc()
+                : SourceLocation()))
+        Invalid = true;
 
   Param->setAccess(AS_public);
   Param->setImplicit(D->isImplicit());
@@ -3545,6 +3614,12 @@ Decl *TemplateDeclInstantiator::VisitConceptDecl(ConceptDecl *D) {
   llvm_unreachable("Concept definitions cannot reside inside a template");
 }
 
+Decl *
+TemplateDeclInstantiator::VisitRequiresExprBodyDecl(RequiresExprBodyDecl *D) {
+  return RequiresExprBodyDecl::Create(SemaRef.Context, D->getDeclContext(),
+                                      D->getBeginLoc());
+}
+
 Decl *TemplateDeclInstantiator::VisitDecl(Decl *D) {
   llvm_unreachable("Unexpected decl");
 }
@@ -3658,6 +3733,8 @@ TemplateDeclInstantiator::SubstTemplateParams(TemplateParameterList *L) {
   // checking satisfaction.
   Expr *InstRequiresClause = nullptr;
   if (Expr *E = L->getRequiresClause()) {
+    EnterExpressionEvaluationContext ConstantEvaluated(
+        SemaRef, Sema::ExpressionEvaluationContext::Unevaluated);
     ExprResult Res = SemaRef.SubstExpr(E, TemplateArgs);
     if (Res.isInvalid() || !Res.isUsable()) {
       return nullptr;
@@ -4181,9 +4258,9 @@ bool Sema::CheckInstantiatedFunctionTemplateConstraints(
         MLTAL.getInnermost(), SourceRange());
     if (Inst.isInvalid())
       return true;
-    if (addInstantiatedParametersToScope(*this, Decl,
-                                        Decl->getTemplateInstantiationPattern(),
-                                         Scope, MLTAL))
+    if (addInstantiatedParametersToScope(
+            *this, Decl, Decl->getPrimaryTemplate()->getTemplatedDecl(),
+            Scope, MLTAL))
       return true;
   }
 

@@ -16,6 +16,7 @@
 #include "llvm/DebugInfo/DWARF/DWARFRelocMap.h"
 #include "llvm/Support/Errc.h"
 #include "llvm/Support/Format.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -114,8 +115,9 @@ void DWARFDebugLine::Prologue::dump(raw_ostream &OS,
      << format("     opcode_base: %u\n", OpcodeBase);
 
   for (uint32_t I = 0; I != StandardOpcodeLengths.size(); ++I)
-    OS << format("standard_opcode_lengths[%s] = %u\n",
-                 LNStandardString(I + 1).data(), StandardOpcodeLengths[I]);
+    OS << formatv("standard_opcode_lengths[{0}] = {1}\n",
+                  static_cast<dwarf::LineNumberOps>(I + 1),
+                  StandardOpcodeLengths[I]);
 
   if (!IncludeDirectories.empty()) {
     // DWARF v5 starts directory indexes at 0.
@@ -607,19 +609,28 @@ Error DWARFDebugLine::LineTable::parse(
         //
         // Make sure the extractor knows the address size.  If not, infer it
         // from the size of the operand.
-        if (DebugLineData.getAddressSize() == 0)
+        {
+          uint8_t ExtractorAddressSize = DebugLineData.getAddressSize();
+          if (ExtractorAddressSize != Len - 1 && ExtractorAddressSize != 0)
+            RecoverableErrorCallback(createStringError(
+                errc::invalid_argument,
+                "mismatching address size at offset 0x%8.8" PRIx64
+                " expected 0x%2.2" PRIx8 " found 0x%2.2" PRIx64,
+                ExtOffset, ExtractorAddressSize, Len - 1));
+
+          // Assume that the line table is correct and temporarily override the
+          // address size.
           DebugLineData.setAddressSize(Len - 1);
-        else if (DebugLineData.getAddressSize() != Len - 1) {
-          return createStringError(errc::invalid_argument,
-                             "mismatching address size at offset 0x%8.8" PRIx64
-                             " expected 0x%2.2" PRIx8 " found 0x%2.2" PRIx64,
-                             ExtOffset, DebugLineData.getAddressSize(),
-                             Len - 1);
+          State.Row.Address.Address = DebugLineData.getRelocatedAddress(
+              OffsetPtr, &State.Row.Address.SectionIndex);
+
+          // Restore the address size if the extractor already had it.
+          if (ExtractorAddressSize != 0)
+            DebugLineData.setAddressSize(ExtractorAddressSize);
+
+          if (OS)
+            *OS << format(" (0x%16.16" PRIx64 ")", State.Row.Address.Address);
         }
-        State.Row.Address.Address = DebugLineData.getRelocatedAddress(
-            OffsetPtr, &State.Row.Address.SectionIndex);
-        if (OS)
-          *OS << format(" (0x%16.16" PRIx64 ")", State.Row.Address.Address);
         break;
 
       case DW_LNE_define_file:

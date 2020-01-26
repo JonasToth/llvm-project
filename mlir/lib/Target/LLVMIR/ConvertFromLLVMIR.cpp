@@ -1,6 +1,6 @@
 //===- ConvertFromLLVMIR.cpp - MLIR to LLVM IR conversion -----------------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -209,6 +209,8 @@ Attribute Importer::getConstantAsAttr(llvm::Constant *value) {
     else if (c->getType()->isFloatingPointTy())
       return b.getFloatAttr(FloatType::getF32(context), c->getValueAPF());
   }
+  if (auto *f = dyn_cast<llvm::Function>(value))
+    return b.getSymbolRefAttr(f->getName());
   return Attribute();
 }
 

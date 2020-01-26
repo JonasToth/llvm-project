@@ -95,7 +95,7 @@ template <class ELFT> static ErrorPlace getErrPlace(const uint8_t *loc) {
   assert(loc != nullptr);
   for (InputSectionBase *d : inputSections) {
     auto *isec = cast<InputSection>(d);
-    if (!isec->getParent())
+    if (!isec->getParent() || (isec->type & SHT_NOBITS))
       continue;
 
     const uint8_t *isecLoc =
@@ -155,26 +155,27 @@ RelExpr TargetInfo::adjustRelaxExpr(RelType type, const uint8_t *data,
   return expr;
 }
 
-void TargetInfo::relaxGot(uint8_t *loc, RelType type, uint64_t val) const {
+void TargetInfo::relaxGot(uint8_t *loc, const Relocation &rel,
+                          uint64_t val) const {
   llvm_unreachable("Should not have claimed to be relaxable");
 }
 
-void TargetInfo::relaxTlsGdToLe(uint8_t *loc, RelType type,
+void TargetInfo::relaxTlsGdToLe(uint8_t *loc, const Relocation &rel,
                                 uint64_t val) const {
   llvm_unreachable("Should not have claimed to be relaxable");
 }
 
-void TargetInfo::relaxTlsGdToIe(uint8_t *loc, RelType type,
+void TargetInfo::relaxTlsGdToIe(uint8_t *loc, const Relocation &rel,
                                 uint64_t val) const {
   llvm_unreachable("Should not have claimed to be relaxable");
 }
 
-void TargetInfo::relaxTlsIeToLe(uint8_t *loc, RelType type,
+void TargetInfo::relaxTlsIeToLe(uint8_t *loc, const Relocation &rel,
                                 uint64_t val) const {
   llvm_unreachable("Should not have claimed to be relaxable");
 }
 
-void TargetInfo::relaxTlsLdToLe(uint8_t *loc, RelType type,
+void TargetInfo::relaxTlsLdToLe(uint8_t *loc, const Relocation &rel,
                                 uint64_t val) const {
   llvm_unreachable("Should not have claimed to be relaxable");
 }

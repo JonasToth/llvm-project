@@ -1,6 +1,6 @@
 //===- DependenceAnalysis.cpp - Dependence analysis on SSA views ----------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -139,7 +139,11 @@ LinalgDependenceGraph::getDependencesInto(
 }
 
 void LinalgDependenceGraph::addDependencesBetween(LinalgOp src, LinalgOp dst) {
-  for (auto srcView : src.getOutputs()) { // W
+  assert(src.hasBufferSemantics() &&
+         "expected linalg op with buffer semantics");
+  assert(dst.hasBufferSemantics() &&
+         "expected linalg op with buffer semantics");
+  for (auto srcView : src.getOutputBuffers()) { // W
     // RAW graph
     for (auto dstView : dst.getInputs()) {   // R
       if (aliases.alias(srcView, dstView)) { // if alias, fill RAW
@@ -149,7 +153,7 @@ void LinalgDependenceGraph::addDependencesBetween(LinalgOp src, LinalgOp dst) {
       }
     }
     // WAW graph
-    for (auto dstView : dst.getOutputs()) {  // W
+    for (auto dstView : dst.getOutputBuffers()) { // W
       if (aliases.alias(srcView, dstView)) { // if alias, fill WAW
         addDependenceElem(DependenceType::WAW,
                           LinalgOpView{src.getOperation(), srcView},
@@ -167,7 +171,7 @@ void LinalgDependenceGraph::addDependencesBetween(LinalgOp src, LinalgOp dst) {
       }
     }
     // WAR graph
-    for (auto dstView : dst.getOutputs()) {  // W
+    for (auto dstView : dst.getOutputBuffers()) { // W
       if (aliases.alias(srcView, dstView)) { // if alias, fill WAR
         addDependenceElem(DependenceType::WAR,
                           LinalgOpView{src.getOperation(), srcView},

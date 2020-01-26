@@ -1,6 +1,6 @@
 //===- LinalgOps.td - Linalg dialect ops -------------------*- tablegen -*-===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -68,9 +68,10 @@ def Linalg_ReshapeOp : Linalg_Op<"reshape", [NoSideEffect]>,
     MemRefType is contiguous, the resulting memref may require explicit alloc
     and copies.
 
-    A reassociation is defined as a continous grouping of dimensions and is
-    represented with an affine map array attribute. In the future, non-continous
-    groupings may be allowed (i.e. permutations, reindexings etc).
+    A reassociation is defined as a continuous grouping of dimensions and is
+    represented with an affine map array attribute. In the future,
+    non-continuous groupings may be allowed (i.e. permutations, reindexings
+    etc).
 
     For now, it is assumed that either:
       1. a reassociation produces and consumes contiguous MemRefType or,
@@ -100,9 +101,17 @@ def Linalg_ReshapeOp : Linalg_Op<"reshape", [NoSideEffect]>,
     ```
   }];
 
-  let builders = [OpBuilder<
-    "Builder *b, OperationState &result, Value view, "
-    "ArrayAttr reassociation, ArrayRef<NamedAttribute> attrs = {}">];
+  let builders = [
+    // Builder for a contracting reshape whose result type is computed from
+    // `view` and `reassociation`.
+    OpBuilder<"Builder *b, OperationState &result, Value view, "
+    "ArrayRef<ArrayRef<AffineExpr>> reassociation, "
+    "ArrayRef<NamedAttribute> attrs = {}">,
+    // Builder for a reshape whose result type is passed explicitly. This may be
+    // either a contracting or expanding reshape.
+    OpBuilder<"Builder *b, OperationState &result, Type resultType, Value view,"
+    "ArrayRef<ArrayRef<AffineExpr>> reassociation, "
+    "ArrayRef<NamedAttribute> attrs = {}">];
 
   let extraClassDeclaration = [{
     static StringRef getReassociationAttrName() { return "reassociation"; }

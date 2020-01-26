@@ -244,6 +244,8 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
     S32, S64, S16, V2S16
   };
 
+  const LLT MinLegalScalarShiftTy = ST.has16BitInsts() ? S16 : S32;
+
   setAction({G_BRCOND, S1}, Legal); // VCC branches
   setAction({G_BRCOND, S32}, Legal); // SCC branches
 
@@ -301,14 +303,20 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
     .clampScalar(0, S32, S32)
     .scalarize(0); // TODO: Implement.
 
-  getActionDefinitionsBuilder({G_SADDO, G_SSUBO})
-    .lower();
-
   getActionDefinitionsBuilder(G_BITCAST)
     // Don't worry about the size constraint.
     .legalIf(all(isRegisterType(0), isRegisterType(1)))
     // FIXME: Testing hack
-    .legalForCartesianProduct({S16, LLT::vector(2, 8), });
+    .legalForCartesianProduct({S16, LLT::vector(2, 8), })
+    .lower();
+
+
+  getActionDefinitionsBuilder(G_CONSTANT)
+    .legalFor({S1, S32, S64, S16, GlobalPtr,
+               LocalPtr, ConstantPtr, PrivatePtr, FlatPtr })
+    .clampScalar(0, S32, S64)
+    .widenScalarToNextPow2(0)
+    .legalIf(isPointer(0));
 
   getActionDefinitionsBuilder(G_FCONSTANT)
     .legalFor({S32, S64, S16})
@@ -323,21 +331,10 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
     .widenScalarToNextPow2(0, 32)
     .clampMaxNumElements(0, S32, 16);
 
-
-  // FIXME: i1 operands to intrinsics should always be legal, but other i1
-  // values may not be legal.  We need to figure out how to distinguish
-  // between these two scenarios.
-  getActionDefinitionsBuilder(G_CONSTANT)
-    .legalFor({S1, S32, S64, S16, GlobalPtr,
-               LocalPtr, ConstantPtr, PrivatePtr, FlatPtr })
-    .clampScalar(0, S32, S64)
-    .widenScalarToNextPow2(0)
-    .legalIf(isPointer(0));
-
   setAction({G_FRAME_INDEX, PrivatePtr}, Legal);
   getActionDefinitionsBuilder(G_GLOBAL_VALUE)
     .customFor({LocalPtr, GlobalPtr, ConstantPtr, Constant32Ptr});
-
+  setAction({G_BLOCK_ADDR, CodePtr}, Legal);
 
   auto &FPOpActions = getActionDefinitionsBuilder(
     { G_FADD, G_FMUL, G_FMA, G_FCANONICALIZE})
@@ -397,9 +394,6 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
     .scalarize(0)
     .clampScalar(0, S16, S64);
 
-  // TODO: Implement
-  getActionDefinitionsBuilder({G_FMINIMUM, G_FMAXIMUM}).lower();
-
   if (ST.has16BitInsts()) {
     getActionDefinitionsBuilder({G_FSQRT, G_FFLOOR})
       .legalFor({S32, S64, S16})
@@ -420,9 +414,6 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
     .legalFor({{S64, S32}, {S32, S16}})
     .lowerFor({{S64, S16}}) // FIXME: Implement
     .scalarize(0);
-
-  // TODO: Verify V_BFI_B32 is generated from expanded bit ops.
-  getActionDefinitionsBuilder(G_FCOPYSIGN).lower();
 
   getActionDefinitionsBuilder(G_FSUB)
       // Use actual fsub instruction
@@ -494,16 +485,9 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
       .scalarize(0);
   }
 
-  getActionDefinitionsBuilder(G_PTR_ADD)
-    .legalForCartesianProduct(AddrSpaces64, {S64})
-    .legalForCartesianProduct(AddrSpaces32, {S32})
-    .scalarize(0);
-
-  getActionDefinitionsBuilder(G_PTR_MASK)
+  getActionDefinitionsBuilder({G_PTR_ADD, G_PTR_MASK})
     .scalarize(0)
     .alwaysLegal();
-
-  setAction({G_BLOCK_ADDR, CodePtr}, Legal);
 
   auto &CmpBuilder =
     getActionDefinitionsBuilder(G_ICMP)
@@ -896,10 +880,6 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
                 {S32, FlatPtr}, {S64, FlatPtr}})
     .legalFor({{S32, LocalPtr}, {S64, LocalPtr},
                {S32, RegionPtr}, {S64, RegionPtr}});
-
-  getActionDefinitionsBuilder(G_ATOMIC_CMPXCHG_WITH_SUCCESS)
-    .lower();
-
   // TODO: Pointer types, any 32-bit or 64-bit vector
 
   // Condition should be s32 for scalar, s1 for vector.
@@ -1115,12 +1095,27 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
       .scalarize(1);
   }
 
-  getActionDefinitionsBuilder(G_SEXT_INREG).lower();
-
-  getActionDefinitionsBuilder({G_READ_REGISTER, G_WRITE_REGISTER}).lower();
+  // TODO: Make legal for s32, s64. s64 case needs break down in regbankselect.
+  getActionDefinitionsBuilder(G_SEXT_INREG)
+    .clampScalar(0, MinLegalScalarShiftTy, S64)
+    .lower();
 
   getActionDefinitionsBuilder(G_READCYCLECOUNTER)
     .legalFor({S64});
+
+  getActionDefinitionsBuilder({
+      // TODO: Verify V_BFI_B32 is generated from expanded bit ops
+      G_FCOPYSIGN,
+
+      G_ATOMIC_CMPXCHG_WITH_SUCCESS,
+      G_READ_REGISTER,
+      G_WRITE_REGISTER,
+
+      G_SADDO, G_SSUBO,
+
+       // TODO: Implement
+      G_FMINIMUM, G_FMAXIMUM
+    }).lower();
 
   getActionDefinitionsBuilder({G_VASTART, G_VAARG, G_BRJT, G_JUMP_TABLE,
         G_DYN_STACKALLOC, G_INDEXED_LOAD, G_INDEXED_SEXTLOAD,
@@ -1805,14 +1800,26 @@ bool AMDGPULegalizerInfo::legalizeAtomicCmpXChg(
 
 // Return the use branch instruction, otherwise null if the usage is invalid.
 static MachineInstr *verifyCFIntrinsic(MachineInstr &MI,
-                                       MachineRegisterInfo &MRI) {
+                                       MachineRegisterInfo &MRI,
+                                       MachineInstr *&Br) {
   Register CondDef = MI.getOperand(0).getReg();
   if (!MRI.hasOneNonDBGUse(CondDef))
     return nullptr;
 
   MachineInstr &UseMI = *MRI.use_instr_nodbg_begin(CondDef);
-  return UseMI.getParent() == MI.getParent() &&
-    UseMI.getOpcode() == AMDGPU::G_BRCOND ? &UseMI : nullptr;
+  if (UseMI.getParent() != MI.getParent() ||
+      UseMI.getOpcode() != AMDGPU::G_BRCOND)
+    return nullptr;
+
+  // Make sure the cond br is followed by a G_BR
+  MachineBasicBlock::iterator Next = std::next(UseMI.getIterator());
+  if (Next != MI.getParent()->end()) {
+    if (Next->getOpcode() != AMDGPU::G_BR)
+      return nullptr;
+    Br = &*Next;
+  }
+
+  return &UseMI;
 }
 
 Register AMDGPULegalizerInfo::getLiveInRegister(MachineRegisterInfo &MRI,
@@ -2333,6 +2340,22 @@ bool AMDGPULegalizerInfo::legalizeRawBufferStore(MachineInstr &MI,
   return Ty == S32;
 }
 
+bool AMDGPULegalizerInfo::legalizeAtomicIncDec(MachineInstr &MI,
+                                               MachineIRBuilder &B,
+                                               bool IsInc) const {
+  B.setInstr(MI);
+  unsigned Opc = IsInc ? AMDGPU::G_AMDGPU_ATOMIC_INC :
+                         AMDGPU::G_AMDGPU_ATOMIC_DEC;
+  B.buildInstr(Opc)
+    .addDef(MI.getOperand(0).getReg())
+    .addUse(MI.getOperand(2).getReg())
+    .addUse(MI.getOperand(3).getReg())
+    .cloneMemRefs(MI);
+  MI.eraseFromParent();
+  return true;
+}
+
+// FIMXE: Needs observer like custom
 bool AMDGPULegalizerInfo::legalizeIntrinsic(MachineInstr &MI,
                                             MachineRegisterInfo &MRI,
                                             MachineIRBuilder &B) const {
@@ -2341,7 +2364,8 @@ bool AMDGPULegalizerInfo::legalizeIntrinsic(MachineInstr &MI,
   switch (IntrID) {
   case Intrinsic::amdgcn_if:
   case Intrinsic::amdgcn_else: {
-    if (MachineInstr *BrCond = verifyCFIntrinsic(MI, MRI)) {
+    MachineInstr *Br = nullptr;
+    if (MachineInstr *BrCond = verifyCFIntrinsic(MI, MRI, Br)) {
       const SIRegisterInfo *TRI
         = static_cast<const SIRegisterInfo *>(MRI.getTargetRegisterInfo());
 
@@ -2349,18 +2373,25 @@ bool AMDGPULegalizerInfo::legalizeIntrinsic(MachineInstr &MI,
       Register Def = MI.getOperand(1).getReg();
       Register Use = MI.getOperand(3).getReg();
 
+      MachineBasicBlock *BrTarget = BrCond->getOperand(1).getMBB();
+      if (Br)
+        BrTarget = Br->getOperand(0).getMBB();
+
       if (IntrID == Intrinsic::amdgcn_if) {
         B.buildInstr(AMDGPU::SI_IF)
           .addDef(Def)
           .addUse(Use)
-          .addMBB(BrCond->getOperand(1).getMBB());
+          .addMBB(BrTarget);
       } else {
         B.buildInstr(AMDGPU::SI_ELSE)
           .addDef(Def)
           .addUse(Use)
-          .addMBB(BrCond->getOperand(1).getMBB())
+          .addMBB(BrTarget)
           .addImm(0);
       }
+
+      if (Br)
+        Br->getOperand(0).setMBB(BrCond->getOperand(1).getMBB());
 
       MRI.setRegClass(Def, TRI->getWaveMaskRegClass());
       MRI.setRegClass(Use, TRI->getWaveMaskRegClass());
@@ -2372,11 +2403,14 @@ bool AMDGPULegalizerInfo::legalizeIntrinsic(MachineInstr &MI,
     return false;
   }
   case Intrinsic::amdgcn_loop: {
-    if (MachineInstr *BrCond = verifyCFIntrinsic(MI, MRI)) {
+    MachineInstr *Br = nullptr;
+    if (MachineInstr *BrCond = verifyCFIntrinsic(MI, MRI, Br)) {
       const SIRegisterInfo *TRI
         = static_cast<const SIRegisterInfo *>(MRI.getTargetRegisterInfo());
 
       B.setInstr(*BrCond);
+
+      // FIXME: Need to adjust branch targets based on unconditional branch.
       Register Reg = MI.getOperand(2).getReg();
       B.buildInstr(AMDGPU::SI_LOOP)
         .addUse(Reg)
@@ -2440,6 +2474,10 @@ bool AMDGPULegalizerInfo::legalizeIntrinsic(MachineInstr &MI,
     return legalizeRawBufferStore(MI, MRI, B, false);
   case Intrinsic::amdgcn_raw_buffer_store_format:
     return legalizeRawBufferStore(MI, MRI, B, true);
+  case Intrinsic::amdgcn_atomic_inc:
+    return legalizeAtomicIncDec(MI, B, true);
+  case Intrinsic::amdgcn_atomic_dec:
+    return legalizeAtomicIncDec(MI, B, false);
   default:
     return true;
   }
