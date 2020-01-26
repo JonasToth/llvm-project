@@ -10,6 +10,7 @@
 #include "clang/AST/OperationKinds.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 
 namespace clang {
@@ -134,7 +135,8 @@ const Stmt *tryEachMatch(ArrayRef<ast_matchers::BoundNodes> Matches,
 
 const Stmt *ExprMutationAnalyzer::findMutation(const Expr *Exp) {
   return findMutationMemoized(Exp,
-                              {&ExprMutationAnalyzer::findDirectMutation,
+                              {&ExprMutationAnalyzer::findDependentUsage,
+                               &ExprMutationAnalyzer::findDirectMutation,
                                &ExprMutationAnalyzer::findMemberMutation,
                                &ExprMutationAnalyzer::findArrayElementMutation,
                                &ExprMutationAnalyzer::findCastMutation,
@@ -238,6 +240,10 @@ const Stmt *ExprMutationAnalyzer::findDeclPointeeMutation(
     ArrayRef<ast_matchers::BoundNodes> Matches) {
   return tryEachMatch<Decl>(Matches, this,
                             &ExprMutationAnalyzer::findPointeeMutation);
+}
+
+const Stmt *ExprMutationAnalyzer::findDependentUsage(const Expr *Exp) {
+  return Exp->isInstantiationDependent() ? Exp : nullptr;
 }
 
 const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {

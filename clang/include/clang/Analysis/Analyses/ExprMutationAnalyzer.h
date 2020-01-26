@@ -57,6 +57,7 @@ private:
   const Stmt *
   findDeclPointeeMutation(ArrayRef<ast_matchers::BoundNodes> Matches);
 
+  const Stmt *findDependentUsage(const Expr *Exp);
   const Stmt *findDirectMutation(const Expr *Exp);
   const Stmt *findMemberMutation(const Expr *Exp);
   const Stmt *findArrayElementMutation(const Expr *Exp);
