@@ -243,7 +243,12 @@ const Stmt *ExprMutationAnalyzer::findDeclPointeeMutation(
 }
 
 const Stmt *ExprMutationAnalyzer::findDependentUsage(const Expr *Exp) {
-  return Exp->isInstantiationDependent() ? Exp : nullptr;
+  const auto Matches =
+      match(findAll(stmt(hasDescendant(expr(canResolveToExpr(equalsNode(Exp)),
+                                            isTypeDependent())))
+                        .bind("stmt")),
+            Stm, Context);
+  return selectFirst<Stmt>("stmt", Matches);
 }
 
 const Stmt *ExprMutationAnalyzer::findDirectMutation(const Expr *Exp) {
