@@ -183,6 +183,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(cxxMemberCallExpr);
   REGISTER_MATCHER(cxxMethodDecl);
   REGISTER_MATCHER(cxxNewExpr);
+  REGISTER_MATCHER(cxxNoexceptExpr);
   REGISTER_MATCHER(cxxNullPtrLiteralExpr);
   REGISTER_MATCHER(cxxOperatorCallExpr);
   REGISTER_MATCHER(cxxRecordDecl);
@@ -244,6 +245,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(hasAnyDeclaration);
   REGISTER_MATCHER(hasAnyName);
   REGISTER_MATCHER(hasAnyParameter);
+  REGISTER_MATCHER(hasAnyPlacementArg);
   REGISTER_MATCHER(hasAnySelector);
   REGISTER_MATCHER(hasAnySubstatement);
   REGISTER_MATCHER(hasAnyTemplateArgument);
@@ -305,6 +307,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(hasReceiverType);
   REGISTER_MATCHER(hasReplacementType);
   REGISTER_MATCHER(hasReturnValue);
+  REGISTER_MATCHER(hasPlacementArg);
   REGISTER_MATCHER(hasSelector);
   REGISTER_MATCHER(hasSingleDecl);
   REGISTER_MATCHER(hasSize);
@@ -494,6 +497,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(substTemplateTypeParmType);
   REGISTER_MATCHER(switchCase);
   REGISTER_MATCHER(switchStmt);
+  REGISTER_MATCHER(tagDecl);
   REGISTER_MATCHER(tagType);
   REGISTER_MATCHER(templateArgument);
   REGISTER_MATCHER(templateArgumentCountIs);
@@ -654,7 +658,7 @@ Registry::getMatcherCompletions(ArrayRef<ArgKind> AcceptedTypes) {
         OS << "...";
       OS << ")";
 
-      std::string TypedText = Name;
+      std::string TypedText = std::string(Name);
       TypedText += "(";
       if (ArgsKinds.empty())
         TypedText += ")";

@@ -58,6 +58,8 @@ void populateBuiltinFuncToSPIRVPatterns(MLIRContext *context,
                                         OwningRewritePatternList &patterns);
 
 namespace spirv {
+class AccessChainOp;
+
 class SPIRVConversionTarget : public ConversionTarget {
 public:
   /// Creates a SPIR-V conversion target for the given target environment.
@@ -83,10 +85,22 @@ private:
   llvm::SmallSet<Capability, 8> givenCapabilities; /// Allowed capabilities
 };
 
-/// Returns a value that represents a builtin variable value within the SPIR-V
-/// module.
+/// Returns the value for the given `builtin` variable. This function gets or
+/// inserts the global variable associated for the builtin within the nearest
+/// enclosing op that has a symbol table. Returns null Value if such an
+/// enclosing op cannot be found.
 Value getBuiltinVariableValue(Operation *op, BuiltIn builtin,
                               OpBuilder &builder);
+
+/// Performs the index computation to get to the element at `indices` of the
+/// memory pointed to by `basePtr`, using the layout map of `baseType`.
+
+// TODO(ravishankarm) : This method assumes that the `baseType` is a MemRefType
+// with AffineMap that has static strides. Extend to handle dynamic strides.
+spirv::AccessChainOp getElementPtr(SPIRVTypeConverter &typeConverter,
+                                   MemRefType baseType, Value basePtr,
+                                   ArrayRef<Value> indices, Location loc,
+                                   OpBuilder &builder);
 
 /// Sets the InterfaceVarABIAttr and EntryPointABIAttr for a function and its
 /// arguments.

@@ -1724,7 +1724,7 @@ TEST(IgnoringImplicit, MatchesImplicit) {
 }
 
 TEST(IgnoringImplicit, MatchesNestedImplicit) {
-  StringRef Code = R"(
+  const char *Code = R"(
 
 struct OtherType;
 
@@ -1769,7 +1769,7 @@ TEST(IgnoringImplicit, DoesNotMatchIncorrectly) {
 
 TEST(Traversal, traverseMatcher) {
 
-  StringRef VarDeclCode = R"cpp(
+  const char *VarDeclCode = R"cpp(
 void foo()
 {
   int i = 3.0;
@@ -1844,7 +1844,7 @@ void foo()
       functionDecl(traverse(ast_type_traits::TK_IgnoreUnlessSpelledInSource,
                             hasAnyName("foo", "bar")))));
 
-  llvm::StringRef Code = R"cpp(
+  const char *Code = R"cpp(
 void foo(int a)
 {
   int i = 3.0 + a;
@@ -1896,12 +1896,22 @@ void foo()
       Code,
       traverse(ast_type_traits::TK_IgnoreUnlessSpelledInSource,
                integerLiteral(equals(3), hasParent(varDecl(hasName("i")))))));
+
+  Code = R"cpp(
+const char *SomeString{"str"};
+)cpp";
+  EXPECT_TRUE(matches(Code, traverse(ast_type_traits::TK_AsIs,
+                                     stringLiteral(hasParent(implicitCastExpr(
+                                         hasParent(initListExpr())))))));
+  EXPECT_TRUE(
+      matches(Code, traverse(ast_type_traits::TK_IgnoreUnlessSpelledInSource,
+                             stringLiteral(hasParent(initListExpr())))));
 }
 
 template <typename MatcherT>
 bool matcherTemplateWithBinding(StringRef Code, const MatcherT &M) {
   return matchAndVerifyResultTrue(
-      Code, M.bind("matchedStmt"),
+      std::string(Code), M.bind("matchedStmt"),
       std::make_unique<VerifyIdIsBoundTo<ReturnStmt>>("matchedStmt", 1));
 }
 
@@ -1923,7 +1933,7 @@ int foo()
 
 TEST(Traversal, traverseMatcherNesting) {
 
-  StringRef Code = R"cpp(
+  const char *Code = R"cpp(
 float bar(int i)
 {
   return i;
@@ -1944,7 +1954,7 @@ void foo()
 }
 
 TEST(Traversal, traverseMatcherThroughImplicit) {
-  StringRef Code = R"cpp(
+  const char *Code = R"cpp(
 struct S {
   S(int x);
 };
@@ -1964,7 +1974,7 @@ void constructImplicit() {
 
 TEST(Traversal, traverseMatcherThroughMemoization) {
 
-  StringRef Code = R"cpp(
+  const char *Code = R"cpp(
 void foo()
 {
   int i = 3.0;
@@ -1989,7 +1999,7 @@ void foo()
 
 TEST(Traversal, traverseUnlessSpelledInSource) {
 
-  StringRef Code = R"cpp(
+  const char *Code = R"cpp(
 
 struct A
 {
@@ -3264,6 +3274,46 @@ TEST(ClassTemplateSpecializationDecl, HasSpecializedTemplate) {
   EXPECT_TRUE(
       matches("template<typename T> class A {}; typedef A<int> B;", Matcher));
   EXPECT_TRUE(notMatches("template<typename T> class A {};", Matcher));
+}
+
+TEST(CXXNewExpr, Array) {
+  StatementMatcher NewArray = cxxNewExpr(isArray());
+
+  EXPECT_TRUE(matches("void foo() { int *Ptr = new int[10]; }", NewArray));
+  EXPECT_TRUE(notMatches("void foo() { int *Ptr = new int; }", NewArray));
+
+  StatementMatcher NewArraySize10 =
+      cxxNewExpr(hasArraySize(integerLiteral(equals(10))));
+  EXPECT_TRUE(
+      matches("void foo() { int *Ptr = new int[10]; }", NewArraySize10));
+  EXPECT_TRUE(
+      notMatches("void foo() { int *Ptr = new int[20]; }", NewArraySize10));
+}
+
+TEST(CXXNewExpr, PlacementArgs) {
+  StatementMatcher IsPlacementNew = cxxNewExpr(hasAnyPlacementArg(anything()));
+
+  EXPECT_TRUE(matches(R"(
+    void* operator new(decltype(sizeof(void*)), void*); 
+    int *foo(void* Storage) {
+      return new (Storage) int; 
+    })",
+                      IsPlacementNew));
+
+  EXPECT_TRUE(matches(R"(
+    void* operator new(decltype(sizeof(void*)), void*, unsigned); 
+    int *foo(void* Storage) {
+      return new (Storage, 16) int; 
+    })",
+                      cxxNewExpr(hasPlacementArg(
+                          1, ignoringImpCasts(integerLiteral(equals(16)))))));
+
+  EXPECT_TRUE(notMatches(R"(
+    void* operator new(decltype(sizeof(void*)), void*); 
+    int *foo(void* Storage) {
+      return new int; 
+    })",
+                         IsPlacementNew));
 }
 
 } // namespace ast_matchers
