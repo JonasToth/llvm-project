@@ -82,19 +82,8 @@ New checks
 - New :doc:`altera-struct-pack-align
   <clang-tidy/checks/altera-struct-pack-align>` check.
 
-<<<<<<< HEAD
-
-- New :doc:`cppcoreguidelines-const-correctness
-  <clang-tidy/checks/cppcoreguidelines-const-correctness>` check.
-
-  Suggest adding ``const`` to unmodified local variables.
-
-New check aliases
-^^^^^^^^^^^^^^^^^
-=======
   Finds structs that are inefficiently packed or aligned, and recommends
   packing and/or aligning of said structs as needed.
->>>>>>> master
 
 - New :doc:`bugprone-misplaced-pointer-arithmetic-in-alloc
   <clang-tidy/checks/bugprone-misplaced-pointer-arithmetic-in-alloc>` check.
@@ -104,6 +93,14 @@ New check aliases
 
   Finds condition variables in nested ``if`` statements that were also checked
   in the outer ``if`` statement and were not changed.
+
+- New :doc:`cppcoreguidelines-const-correctness
+  <clang-tidy/checks/cppcoreguidelines-const-correctness>` check.
+
+  Suggest adding ``const`` to unmodified local variables.
+
+New check aliases
+^^^^^^^^^^^^^^^^^
 
 Changes in existing checks
 ^^^^^^^^^^^^^^^^^^^^^^^^^^

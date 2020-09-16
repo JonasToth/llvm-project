@@ -5,11 +5,8 @@ set(LLVM_LINK_COMPONENTS
 
 add_clang_library(clangTidyCppCoreGuidelinesModule
   AvoidGotoCheck.cpp
-<<<<<<< HEAD
-  ConstCorrectnessCheck.cpp
-=======
   AvoidNonConstGlobalVariablesCheck.cpp
->>>>>>> master
+  ConstCorrectnessCheck.cpp
   CppCoreGuidelinesTidyModule.cpp
   InitVariablesCheck.cpp
   InterfacesGlobalInitCheck.cpp
@@ -31,15 +28,12 @@ add_clang_library(clangTidyCppCoreGuidelinesModule
   SpecialMemberFunctionsCheck.cpp
 
   LINK_LIBS
-<<<<<<< HEAD
   clangAnalysis
   clangAST
   clangASTMatchers
   clangBasic
   clangLex
   clangSerialization
-=======
->>>>>>> master
   clangTidy
   clangTidyMiscModule
   clangTidyModernizeModule
