@@ -13,6 +13,8 @@
 #ifndef MLIR_DIALECT_SPIRV_SPIRVTYPES_H_
 #define MLIR_DIALECT_SPIRV_SPIRVTYPES_H_
 
+#include "mlir/IR/Diagnostics.h"
+#include "mlir/IR/Location.h"
 #include "mlir/IR/StandardTypes.h"
 #include "mlir/IR/TypeSupport.h"
 #include "mlir/IR/Types.h"
@@ -54,33 +56,99 @@ SmallVector<Capability, 0> getRecursiveImpliedCapabilities(Capability cap);
 
 namespace detail {
 struct ArrayTypeStorage;
+struct CooperativeMatrixTypeStorage;
 struct ImageTypeStorage;
+struct MatrixTypeStorage;
 struct PointerTypeStorage;
 struct RuntimeArrayTypeStorage;
 struct StructTypeStorage;
+
 } // namespace detail
 
-namespace TypeKind {
-enum Kind {
-  Array = Type::FIRST_SPIRV_TYPE,
-  Image,
-  Pointer,
-  RuntimeArray,
-  Struct,
-  LAST_SPIRV_TYPE = Struct,
-};
-}
-
-// SPIR-V composite type: VectorType, SPIR-V ArrayType, or SPIR-V StructType.
-class CompositeType : public Type {
+// Base SPIR-V type for providing availability queries.
+class SPIRVType : public Type {
 public:
   using Type::Type;
 
   static bool classof(Type type);
 
+  bool isScalarOrVector();
+
+  /// The extension requirements for each type are following the
+  /// ((Extension::A OR Extension::B) AND (Extension::C OR Extension::D))
+  /// convention.
+  using ExtensionArrayRefVector = SmallVectorImpl<ArrayRef<Extension>>;
+
+  /// Appends to `extensions` the extensions needed for this type to appear in
+  /// the given `storage` class. This method does not guarantee the uniqueness
+  /// of extensions; the same extension may be appended multiple times.
+  void getExtensions(ExtensionArrayRefVector &extensions,
+                     Optional<StorageClass> storage = llvm::None);
+
+  /// The capability requirements for each type are following the
+  /// ((Capability::A OR Extension::B) AND (Capability::C OR Capability::D))
+  /// convention.
+  using CapabilityArrayRefVector = SmallVectorImpl<ArrayRef<Capability>>;
+
+  /// Appends to `capabilities` the capabilities needed for this type to appear
+  /// in the given `storage` class. This method does not guarantee the
+  /// uniqueness of capabilities; the same capability may be appended multiple
+  /// times.
+  void getCapabilities(CapabilityArrayRefVector &capabilities,
+                       Optional<StorageClass> storage = llvm::None);
+
+  /// Returns the size in bytes for each type. If no size can be calculated,
+  /// returns `llvm::None`. Note that if the type has explicit layout, it is
+  /// also taken into account in calculation.
+  Optional<int64_t> getSizeInBytes();
+};
+
+// SPIR-V scalar type: bool type, integer type, floating point type.
+class ScalarType : public SPIRVType {
+public:
+  using SPIRVType::SPIRVType;
+
+  static bool classof(Type type);
+
+  /// Returns true if the given integer type is valid for the SPIR-V dialect.
+  static bool isValid(FloatType);
+  /// Returns true if the given float type is valid for the SPIR-V dialect.
+  static bool isValid(IntegerType);
+
+  void getExtensions(SPIRVType::ExtensionArrayRefVector &extensions,
+                     Optional<StorageClass> storage = llvm::None);
+  void getCapabilities(SPIRVType::CapabilityArrayRefVector &capabilities,
+                       Optional<StorageClass> storage = llvm::None);
+
+  Optional<int64_t> getSizeInBytes();
+};
+
+// SPIR-V composite type: VectorType, SPIR-V ArrayType, or SPIR-V StructType.
+class CompositeType : public SPIRVType {
+public:
+  using SPIRVType::SPIRVType;
+
+  static bool classof(Type type);
+
+  /// Returns true if the given vector type is valid for the SPIR-V dialect.
+  static bool isValid(VectorType);
+
+  /// Return the number of elements of the type. This should only be called if
+  /// hasCompileTimeKnownNumElements is true.
   unsigned getNumElements() const;
 
   Type getElementType(unsigned) const;
+
+  /// Return true if the number of elements is known at compile time and is not
+  /// implementation dependent.
+  bool hasCompileTimeKnownNumElements() const;
+
+  void getExtensions(SPIRVType::ExtensionArrayRefVector &extensions,
+                     Optional<StorageClass> storage = llvm::None);
+  void getCapabilities(SPIRVType::CapabilityArrayRefVector &capabilities,
+                       Optional<StorageClass> storage = llvm::None);
+
+  Optional<int64_t> getSizeInBytes();
 };
 
 // SPIR-V array type
@@ -88,32 +156,36 @@ class ArrayType : public Type::TypeBase<ArrayType, CompositeType,
                                         detail::ArrayTypeStorage> {
 public:
   using Base::Base;
-  // Zero layout specifies that is no layout
-  using LayoutInfo = uint64_t;
-
-  static bool kindof(unsigned kind) { return kind == TypeKind::Array; }
 
   static ArrayType get(Type elementType, unsigned elementCount);
 
+  /// Returns an array type with the given stride in bytes.
   static ArrayType get(Type elementType, unsigned elementCount,
-                       LayoutInfo layoutInfo);
+                       unsigned stride);
 
   unsigned getNumElements() const;
 
   Type getElementType() const;
 
-  bool hasLayout() const;
+  /// Returns the array stride in bytes. 0 means no stride decorated on this
+  /// type.
+  unsigned getArrayStride() const;
 
-  uint64_t getArrayStride() const;
+  void getExtensions(SPIRVType::ExtensionArrayRefVector &extensions,
+                     Optional<StorageClass> storage = llvm::None);
+  void getCapabilities(SPIRVType::CapabilityArrayRefVector &capabilities,
+                       Optional<StorageClass> storage = llvm::None);
+
+  /// Returns the array size in bytes. Since array type may have an explicit
+  /// stride declaration (in bytes), we also include it in the calculation.
+  Optional<int64_t> getSizeInBytes();
 };
 
 // SPIR-V image type
 class ImageType
-    : public Type::TypeBase<ImageType, Type, detail::ImageTypeStorage> {
+    : public Type::TypeBase<ImageType, SPIRVType, detail::ImageTypeStorage> {
 public:
   using Base::Base;
-
-  static bool kindof(unsigned kind) { return kind == TypeKind::Image; }
 
   static ImageType
   get(Type elementType, Dim dim,
@@ -140,36 +212,54 @@ public:
   ImageSamplingInfo getSamplingInfo() const;
   ImageSamplerUseInfo getSamplerUseInfo() const;
   ImageFormat getImageFormat() const;
-  // TODO(ravishankarm): Add support for Access qualifier
+  // TODO: Add support for Access qualifier
+
+  void getExtensions(SPIRVType::ExtensionArrayRefVector &extensions,
+                     Optional<StorageClass> storage = llvm::None);
+  void getCapabilities(SPIRVType::CapabilityArrayRefVector &capabilities,
+                       Optional<StorageClass> storage = llvm::None);
 };
 
 // SPIR-V pointer type
-class PointerType
-    : public Type::TypeBase<PointerType, Type, detail::PointerTypeStorage> {
+class PointerType : public Type::TypeBase<PointerType, SPIRVType,
+                                          detail::PointerTypeStorage> {
 public:
   using Base::Base;
-
-  static bool kindof(unsigned kind) { return kind == TypeKind::Pointer; }
 
   static PointerType get(Type pointeeType, StorageClass storageClass);
 
   Type getPointeeType() const;
 
   StorageClass getStorageClass() const;
+
+  void getExtensions(SPIRVType::ExtensionArrayRefVector &extensions,
+                     Optional<StorageClass> storage = llvm::None);
+  void getCapabilities(SPIRVType::CapabilityArrayRefVector &capabilities,
+                       Optional<StorageClass> storage = llvm::None);
 };
 
 // SPIR-V run-time array type
 class RuntimeArrayType
-    : public Type::TypeBase<RuntimeArrayType, Type,
+    : public Type::TypeBase<RuntimeArrayType, SPIRVType,
                             detail::RuntimeArrayTypeStorage> {
 public:
   using Base::Base;
 
-  static bool kindof(unsigned kind) { return kind == TypeKind::RuntimeArray; }
-
   static RuntimeArrayType get(Type elementType);
 
+  /// Returns a runtime array type with the given stride in bytes.
+  static RuntimeArrayType get(Type elementType, unsigned stride);
+
   Type getElementType() const;
+
+  /// Returns the array stride in bytes. 0 means no stride decorated on this
+  /// type.
+  unsigned getArrayStride() const;
+
+  void getExtensions(SPIRVType::ExtensionArrayRefVector &extensions,
+                     Optional<StorageClass> storage = llvm::None);
+  void getCapabilities(SPIRVType::CapabilityArrayRefVector &capabilities,
+                       Optional<StorageClass> storage = llvm::None);
 };
 
 // SPIR-V struct type
@@ -178,22 +268,38 @@ class StructType : public Type::TypeBase<StructType, CompositeType,
 public:
   using Base::Base;
 
-  // Layout information used for members in a struct in SPIR-V
-  //
-  // TODO(ravishankarm) : For now this only supports the offset type, so uses
-  // uint64_t value to represent the offset, with
-  // std::numeric_limit<uint64_t>::max indicating no offset. Change this to
-  // something that can hold all the information needed for different member
-  // types
-  using LayoutInfo = uint64_t;
+  // Type for specifying the offset of the struct members
+  using OffsetInfo = uint32_t;
 
-  using MemberDecorationInfo = std::pair<uint32_t, spirv::Decoration>;
+  // Type for specifying the decoration(s) on struct members
+  struct MemberDecorationInfo {
+    uint32_t memberIndex : 31;
+    uint32_t hasValue : 1;
+    Decoration decoration;
+    uint32_t decorationValue;
 
-  static bool kindof(unsigned kind) { return kind == TypeKind::Struct; }
+    MemberDecorationInfo(uint32_t index, uint32_t hasValue,
+                         Decoration decoration, uint32_t decorationValue)
+        : memberIndex(index), hasValue(hasValue), decoration(decoration),
+          decorationValue(decorationValue) {}
+
+    bool operator==(const MemberDecorationInfo &other) const {
+      return (this->memberIndex == other.memberIndex) &&
+             (this->decoration == other.decoration) &&
+             (this->decorationValue == other.decorationValue);
+    }
+
+    bool operator<(const MemberDecorationInfo &other) const {
+      return this->memberIndex < other.memberIndex ||
+             (this->memberIndex == other.memberIndex &&
+              static_cast<uint32_t>(this->decoration) <
+                  static_cast<uint32_t>(other.decoration));
+    }
+  };
 
   /// Construct a StructType with at least one member.
   static StructType get(ArrayRef<Type> memberTypes,
-                        ArrayRef<LayoutInfo> layoutInfo = {},
+                        ArrayRef<OffsetInfo> offsetInfo = {},
                         ArrayRef<MemberDecorationInfo> memberDecorations = {});
 
   /// Construct a struct with no members.
@@ -203,19 +309,112 @@ public:
 
   Type getElementType(unsigned) const;
 
-  bool hasLayout() const;
+  /// Range class for element types.
+  class ElementTypeRange
+      : public ::llvm::detail::indexed_accessor_range_base<
+            ElementTypeRange, const Type *, Type, Type, Type> {
+  private:
+    using RangeBaseT::RangeBaseT;
 
-  uint64_t getOffset(unsigned) const;
+    /// See `llvm::detail::indexed_accessor_range_base` for details.
+    static const Type *offset_base(const Type *object, ptrdiff_t index) {
+      return object + index;
+    }
+    /// See `llvm::detail::indexed_accessor_range_base` for details.
+    static Type dereference_iterator(const Type *object, ptrdiff_t index) {
+      return object[index];
+    }
 
-  // Returns in `allMemberDecorations` the spirv::Decorations (apart from
-  // Offset) associated with all members of the StructType.
+    /// Allow base class access to `offset_base` and `dereference_iterator`.
+    friend RangeBaseT;
+  };
+
+  ElementTypeRange getElementTypes() const;
+
+  bool hasOffset() const;
+
+  uint64_t getMemberOffset(unsigned) const;
+
+  // Returns in `memberDecorations` the Decorations (apart from Offset)
+  // associated with all members of the StructType.
   void getMemberDecorations(SmallVectorImpl<StructType::MemberDecorationInfo>
-                                &allMemberDecorations) const;
+                                &memberDecorations) const;
 
-  // Returns in `memberDecorations` all the spirv::Decorations (apart from
-  // Offset) associated with the `i`-th member of the StructType.
-  void getMemberDecorations(
-      unsigned i, SmallVectorImpl<spirv::Decoration> &memberDecorations) const;
+  // Returns in `decorationsInfo` all the Decorations (apart from Offset)
+  // associated with the `i`-th member of the StructType.
+  void getMemberDecorations(unsigned i,
+                            SmallVectorImpl<StructType::MemberDecorationInfo>
+                                &decorationsInfo) const;
+
+  void getExtensions(SPIRVType::ExtensionArrayRefVector &extensions,
+                     Optional<StorageClass> storage = llvm::None);
+  void getCapabilities(SPIRVType::CapabilityArrayRefVector &capabilities,
+                       Optional<StorageClass> storage = llvm::None);
+};
+
+llvm::hash_code
+hash_value(const StructType::MemberDecorationInfo &memberDecorationInfo);
+
+// SPIR-V cooperative matrix type
+class CooperativeMatrixNVType
+    : public Type::TypeBase<CooperativeMatrixNVType, CompositeType,
+                            detail::CooperativeMatrixTypeStorage> {
+public:
+  using Base::Base;
+
+  static CooperativeMatrixNVType get(Type elementType, Scope scope,
+                                     unsigned rows, unsigned columns);
+  Type getElementType() const;
+
+  /// Return the scope of the cooperative matrix.
+  Scope getScope() const;
+  /// return the number of rows of the matrix.
+  unsigned getRows() const;
+  /// return the number of columns of the matrix.
+  unsigned getColumns() const;
+
+  void getExtensions(SPIRVType::ExtensionArrayRefVector &extensions,
+                     Optional<StorageClass> storage = llvm::None);
+  void getCapabilities(SPIRVType::CapabilityArrayRefVector &capabilities,
+                       Optional<StorageClass> storage = llvm::None);
+};
+
+// SPIR-V matrix type
+class MatrixType : public Type::TypeBase<MatrixType, CompositeType,
+                                         detail::MatrixTypeStorage> {
+public:
+  using Base::Base;
+
+  static MatrixType get(Type columnType, uint32_t columnCount);
+
+  static MatrixType getChecked(Type columnType, uint32_t columnCount,
+                               Location location);
+
+  static LogicalResult verifyConstructionInvariants(Location loc,
+                                                    Type columnType,
+                                                    uint32_t columnCount);
+
+  /// Returns true if the matrix elements are vectors of float elements.
+  static bool isValidColumnType(Type columnType);
+
+  Type getColumnType() const;
+
+  /// Returns the number of rows.
+  unsigned getNumRows() const;
+
+  /// Returns the number of columns.
+  unsigned getNumColumns() const;
+
+  /// Returns total number of elements (rows*columns).
+  unsigned getNumElements() const;
+
+  /// Returns the elements' type (i.e, single element type).
+  Type getElementType() const;
+
+  void getExtensions(SPIRVType::ExtensionArrayRefVector &extensions,
+                     Optional<StorageClass> storage = llvm::None);
+  void getCapabilities(SPIRVType::CapabilityArrayRefVector &capabilities,
+                       Optional<StorageClass> storage = llvm::None);
 };
 
 } // end namespace spirv

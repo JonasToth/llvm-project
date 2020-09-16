@@ -249,8 +249,13 @@ TEST(IndexTest, IndexTypeParmDecls) {
   Index->Symbols.clear();
   tooling::runToolOnCode(std::make_unique<IndexAction>(Index, Opts), Code);
   EXPECT_THAT(Index->Symbols,
-              AllOf(Contains(QName("Foo::T")), Contains(QName("Foo::I")),
-                    Contains(QName("Foo::C")), Contains(QName("Foo::NoRef"))));
+              AllOf(Contains(AllOf(QName("Foo::T"),
+                                   Kind(SymbolKind::TemplateTypeParm))),
+                    Contains(AllOf(QName("Foo::I"),
+                                   Kind(SymbolKind::NonTypeTemplateParm))),
+                    Contains(AllOf(QName("Foo::C"),
+                                   Kind(SymbolKind::TemplateTemplateParm))),
+                    Contains(QName("Foo::NoRef"))));
 }
 
 TEST(IndexTest, UsingDecls) {
@@ -312,6 +317,35 @@ TEST(IndexTest, InjecatedNameClass) {
                                    AllOf(QName("Foo"), Kind(SymbolKind::Class),
                                          HasRole(SymbolRole::Reference),
                                          WrittenAt(Position(4, 14)))));
+}
+
+TEST(IndexTest, VisitDefaultArgs) {
+  std::string Code = R"cpp(
+    int var = 0;
+    void f(int s = var) {}
+  )cpp";
+  auto Index = std::make_shared<Indexer>();
+  IndexingOptions Opts;
+  Opts.IndexFunctionLocals = true;
+  Opts.IndexParametersInDeclarations = true;
+  tooling::runToolOnCode(std::make_unique<IndexAction>(Index, Opts), Code);
+  EXPECT_THAT(Index->Symbols,
+              Contains(AllOf(QName("var"), HasRole(SymbolRole::Reference),
+                             WrittenAt(Position(3, 20)))));
+}
+
+TEST(IndexTest, RelationBaseOf) {
+  std::string Code = R"cpp(
+    class A {};
+    template <typename> class B {};
+    class C : B<A> {};
+  )cpp";
+  auto Index = std::make_shared<Indexer>();
+  tooling::runToolOnCode(std::make_unique<IndexAction>(Index), Code);
+  // A should not be the base of anything.
+  EXPECT_THAT(Index->Symbols,
+              Contains(AllOf(QName("A"), HasRole(SymbolRole::Reference),
+                             Not(HasRole(SymbolRole::RelationBaseOf)))));
 }
 
 } // namespace

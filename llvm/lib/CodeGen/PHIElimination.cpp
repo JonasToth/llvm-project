@@ -96,7 +96,8 @@ namespace {
 
     /// Split critical edges where necessary for good coalescer performance.
     bool SplitPHIEdges(MachineFunction &MF, MachineBasicBlock &MBB,
-                       MachineLoopInfo *MLI);
+                       MachineLoopInfo *MLI,
+                       std::vector<SparseBitVector<>> *LiveInSets);
 
     // These functions are temporary abstractions around LiveVariables and
     // LiveIntervals, so they can go away when LiveVariables does.
@@ -151,15 +152,44 @@ bool PHIElimination::runOnMachineFunction(MachineFunction &MF) {
 
   bool Changed = false;
 
-  // This pass takes the function out of SSA form.
-  MRI->leaveSSA();
-
   // Split critical edges to help the coalescer.
   if (!DisableEdgeSplitting && (LV || LIS)) {
+    // A set of live-in regs for each MBB which is used to update LV
+    // efficiently also with large functions.
+    std::vector<SparseBitVector<>> LiveInSets;
+    if (LV) {
+      LiveInSets.resize(MF.size());
+      for (unsigned Index = 0, e = MRI->getNumVirtRegs(); Index != e; ++Index) {
+        // Set the bit for this register for each MBB where it is
+        // live-through or live-in (killed).
+        unsigned VirtReg = Register::index2VirtReg(Index);
+        MachineInstr *DefMI = MRI->getVRegDef(VirtReg);
+        if (!DefMI)
+          continue;
+        LiveVariables::VarInfo &VI = LV->getVarInfo(VirtReg);
+        SparseBitVector<>::iterator AliveBlockItr = VI.AliveBlocks.begin();
+        SparseBitVector<>::iterator EndItr = VI.AliveBlocks.end();
+        while (AliveBlockItr != EndItr) {
+          unsigned BlockNum = *(AliveBlockItr++);
+          LiveInSets[BlockNum].set(Index);
+        }
+        // The register is live into an MBB in which it is killed but not
+        // defined. See comment for VarInfo in LiveVariables.h.
+        MachineBasicBlock *DefMBB = DefMI->getParent();
+        if (VI.Kills.size() > 1 ||
+            (!VI.Kills.empty() && VI.Kills.front()->getParent() != DefMBB))
+          for (auto *MI : VI.Kills)
+            LiveInSets[MI->getParent()->getNumber()].set(Index);
+      }
+    }
+
     MachineLoopInfo *MLI = getAnalysisIfAvailable<MachineLoopInfo>();
     for (auto &MBB : MF)
-      Changed |= SplitPHIEdges(MF, MBB, MLI);
+      Changed |= SplitPHIEdges(MF, MBB, MLI, (LV ? &LiveInSets : nullptr));
   }
+
+  // This pass takes the function out of SSA form.
+  MRI->leaveSSA();
 
   // Populate VRegPHIUseCount
   analyzePHINodes(MF);
@@ -294,21 +324,43 @@ void PHIElimination::LowerPHINode(MachineBasicBlock &MBB,
       // Increment use count of the newly created virtual register.
       LV->setPHIJoin(IncomingReg);
 
-      // When we are reusing the incoming register, it may already have been
-      // killed in this block. The old kill will also have been inserted at
-      // AfterPHIsIt, so it appears before the current PHICopy.
-      if (reusedIncoming)
-        if (MachineInstr *OldKill = VI.findKill(&MBB)) {
-          LLVM_DEBUG(dbgs() << "Remove old kill from " << *OldKill);
-          LV->removeVirtualRegisterKilled(IncomingReg, *OldKill);
-          LLVM_DEBUG(MBB.dump());
-        }
+      MachineInstr *OldKill = nullptr;
+      bool IsPHICopyAfterOldKill = false;
 
-      // Add information to LiveVariables to know that the incoming value is
-      // killed.  Note that because the value is defined in several places (once
-      // each for each incoming block), the "def" block and instruction fields
-      // for the VarInfo is not filled in.
-      LV->addVirtualRegisterKilled(IncomingReg, *PHICopy);
+      if (reusedIncoming && (OldKill = VI.findKill(&MBB))) {
+        // Calculate whether the PHICopy is after the OldKill.
+        // In general, the PHICopy is inserted as the first non-phi instruction
+        // by default, so it's before the OldKill. But some Target hooks for
+        // createPHIDestinationCopy() may modify the default insert position of
+        // PHICopy.
+        for (auto I = MBB.SkipPHIsAndLabels(MBB.begin()), E = MBB.end();
+             I != E; ++I) {
+          if (I == PHICopy)
+            break;
+
+          if (I == OldKill) {
+            IsPHICopyAfterOldKill = true;
+            break;
+          }
+        }
+      }
+
+      // When we are reusing the incoming register and it has been marked killed
+      // by OldKill, if the PHICopy is after the OldKill, we should remove the
+      // killed flag from OldKill.
+      if (IsPHICopyAfterOldKill) {
+        LLVM_DEBUG(dbgs() << "Remove old kill from " << *OldKill);
+        LV->removeVirtualRegisterKilled(IncomingReg, *OldKill);
+        LLVM_DEBUG(MBB.dump());
+      }
+
+      // Add information to LiveVariables to know that the first used incoming
+      // value or the resued incoming value whose PHICopy is after the OldKIll
+      // is killed. Note that because the value is defined in several places
+      // (once each for each incoming block), the "def" block and instruction
+      // fields for the VarInfo is not filled in.
+      if (!OldKill || IsPHICopyAfterOldKill)
+        LV->addVirtualRegisterKilled(IncomingReg, *PHICopy);
     }
 
     // Since we are going to be deleting the PHI node, if it is the last use of
@@ -561,7 +613,8 @@ void PHIElimination::analyzePHINodes(const MachineFunction& MF) {
 
 bool PHIElimination::SplitPHIEdges(MachineFunction &MF,
                                    MachineBasicBlock &MBB,
-                                   MachineLoopInfo *MLI) {
+                                   MachineLoopInfo *MLI,
+                                   std::vector<SparseBitVector<>> *LiveInSets) {
   if (MBB.empty() || !MBB.front().isPHI() || MBB.isEHPad())
     return false;   // Quick exit for basic blocks without PHIs.
 
@@ -628,7 +681,7 @@ bool PHIElimination::SplitPHIEdges(MachineFunction &MF,
       }
       if (!ShouldSplit && !SplitAllCriticalEdges)
         continue;
-      if (!PreMBB->SplitCriticalEdge(&MBB, *this)) {
+      if (!PreMBB->SplitCriticalEdge(&MBB, *this, LiveInSets)) {
         LLVM_DEBUG(dbgs() << "Failed to split critical edge.\n");
         continue;
       }

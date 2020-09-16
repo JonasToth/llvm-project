@@ -47,7 +47,7 @@ class CoreAPIsBasedStandardTest : public testing::Test {
 protected:
   std::shared_ptr<SymbolStringPool> SSP = std::make_shared<SymbolStringPool>();
   ExecutionSession ES{SSP};
-  JITDylib &JD = ES.createJITDylib("JD");
+  JITDylib &JD = ES.createBareJITDylib("JD");
   SymbolStringPtr Foo = ES.intern("foo");
   SymbolStringPtr Bar = ES.intern("bar");
   SymbolStringPtr Baz = ES.intern("baz");
@@ -86,16 +86,18 @@ private:
 class SimpleMaterializationUnit : public orc::MaterializationUnit {
 public:
   using MaterializeFunction =
-      std::function<void(orc::MaterializationResponsibility)>;
+      std::function<void(std::unique_ptr<orc::MaterializationResponsibility>)>;
   using DiscardFunction =
       std::function<void(const orc::JITDylib &, orc::SymbolStringPtr)>;
   using DestructorFunction = std::function<void()>;
 
   SimpleMaterializationUnit(
       orc::SymbolFlagsMap SymbolFlags, MaterializeFunction Materialize,
+      orc::SymbolStringPtr InitSym = nullptr,
       DiscardFunction Discard = DiscardFunction(),
       DestructorFunction Destructor = DestructorFunction())
-      : MaterializationUnit(std::move(SymbolFlags), orc::VModuleKey()),
+      : MaterializationUnit(std::move(SymbolFlags), std::move(InitSym),
+                            orc::VModuleKey()),
         Materialize(std::move(Materialize)), Discard(std::move(Discard)),
         Destructor(std::move(Destructor)) {}
 
@@ -106,7 +108,8 @@ public:
 
   StringRef getName() const override { return "<Simple>"; }
 
-  void materialize(orc::MaterializationResponsibility R) override {
+  void
+  materialize(std::unique_ptr<orc::MaterializationResponsibility> R) override {
     Materialize(std::move(R));
   }
 

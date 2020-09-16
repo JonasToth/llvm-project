@@ -1,5 +1,5 @@
 ====================================================
-Extra Clang Tools 11.0.0 (In-Progress) Release Notes
+Extra Clang Tools 12.0.0 (In-Progress) Release Notes
 ====================================================
 
 .. contents::
@@ -10,7 +10,7 @@ Written by the `LLVM Team <https://llvm.org/>`_
 
 .. warning::
 
-   These are in-progress notes for the upcoming Extra Clang Tools 11 release.
+   These are in-progress notes for the upcoming Extra Clang Tools 12 release.
    Release notes for previous releases can be found on
    `the Download Page <https://releases.llvm.org/download.html>`_.
 
@@ -18,7 +18,7 @@ Introduction
 ============
 
 This document contains the release notes for the Extra Clang Tools, part of the
-Clang release 11.0.0. Here we describe the status of the Extra Clang Tools in
+Clang release 12.0.0. Here we describe the status of the Extra Clang Tools in
 some detail, including major improvements from the previous release and new
 feature work. All LLVM releases may be downloaded from the `LLVM releases web
 site <https://llvm.org/releases/>`_.
@@ -32,7 +32,7 @@ main Clang web page, this document applies to the *next* release, not
 the current one. To see the release notes for a specific release, please
 see the `releases page <https://llvm.org/releases/>`_.
 
-What's New in Extra Clang Tools 11.0.0?
+What's New in Extra Clang Tools 12.0.0?
 =======================================
 
 Some of the major new features and improvements to Extra Clang Tools are listed
@@ -67,27 +67,22 @@ The improvements are...
 Improvements to clang-tidy
 --------------------------
 
+New modules
+^^^^^^^^^^^
+
+- New ``altera`` module.
+
+  Includes checks related to OpenCL for FPGA coding guidelines, based on the
+  `Altera SDK for OpenCL: Best Practices Guide
+  <https://www.altera.com/en_US/pdfs/literature/hb/opencl-sdk/aocl_optimization_guide.pdf>`_.
+
 New checks
 ^^^^^^^^^^
 
-- New :doc:`bugprone-misplaced-pointer-arithmetic-in-alloc
-  <clang-tidy/checks/bugprone-misplaced-pointer-arithmetic-in-alloc>` check.
+- New :doc:`altera-struct-pack-align
+  <clang-tidy/checks/altera-struct-pack-align>` check.
 
-  Finds cases where an integer expression is added to or subtracted from the
-  result of a memory allocation function (``malloc()``, ``calloc()``,
-  ``realloc()``, ``alloca()``) instead of its argument.
-
-- New :doc:`bugprone-reserved-identifier
-  <clang-tidy/checks/bugprone-reserved-identifier>` check.
-
-  Checks for usages of identifiers reserved for use by the implementation.
-  
-- New :doc:`cert-oop57-cpp
-  <clang-tidy/checks/cert-oop57-cpp>` check.
-  
-  Flags use of the `C` standard library functions ``memset``, ``memcpy`` and
-  ``memcmp`` and similar derivatives on non-trivial types.
-
+<<<<<<< HEAD
 
 - New :doc:`cppcoreguidelines-const-correctness
   <clang-tidy/checks/cppcoreguidelines-const-correctness>` check.
@@ -96,29 +91,28 @@ New checks
 
 New check aliases
 ^^^^^^^^^^^^^^^^^
+=======
+  Finds structs that are inefficiently packed or aligned, and recommends
+  packing and/or aligning of said structs as needed.
+>>>>>>> master
 
-- New alias :doc:`cert-dcl37-c
-  <clang-tidy/checks/cert-dcl37-c>` to
-  :doc:`bugprone-reserved-identifier
-  <clang-tidy/checks/bugprone-reserved-identifier>` was added.
+- New :doc:`bugprone-misplaced-pointer-arithmetic-in-alloc
+  <clang-tidy/checks/bugprone-misplaced-pointer-arithmetic-in-alloc>` check.
 
-- New alias :doc:`cert-dcl51-cpp
-  <clang-tidy/checks/cert-dcl51-cpp>` to
-  :doc:`bugprone-reserved-identifier
-  <clang-tidy/checks/bugprone-reserved-identifier>` was added.
+- New :doc:`bugprone-redundant-branch-condition
+  <clang-tidy/checks/bugprone-redundant-branch-condition>` check.
+
+  Finds condition variables in nested ``if`` statements that were also checked
+  in the outer ``if`` statement and were not changed.
 
 Changes in existing checks
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-- Improved :doc:`readability-redundant-string-init
-  <clang-tidy/checks/readability-redundant-string-init>` check now supports a
-  `StringNames` option enabling its application to custom string classes. The 
-  check now detects in class initializers and constructor initializers which 
-  are deemed to be redundant.
+- Improved :doc:`readability-identifier-naming
+  <clang-tidy/checks/readability-identifier-naming>` check.
 
-Renamed checks
-^^^^^^^^^^^^^^
-
+  Added an option `GetConfigPerFile` to support including files which use
+  different naming styles.
 
 Improvements to include-fixer
 -----------------------------
@@ -142,4 +136,3 @@ The improvements are...
 
 Clang-tidy visual studio plugin
 -------------------------------
-

@@ -12,6 +12,7 @@
 
 #include "VEInstrInfo.h"
 #include "VE.h"
+#include "VEMachineFunctionInfo.h"
 #include "VESubtarget.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -24,7 +25,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
 
-#define DEBUG_TYPE "ve"
+#define DEBUG_TYPE "ve-instr-info"
 
 using namespace llvm;
 
@@ -35,58 +36,94 @@ using namespace llvm;
 void VEInstrInfo::anchor() {}
 
 VEInstrInfo::VEInstrInfo(VESubtarget &ST)
-    : VEGenInstrInfo(VE::ADJCALLSTACKDOWN, VE::ADJCALLSTACKUP), RI(),
-      Subtarget(ST) {}
+    : VEGenInstrInfo(VE::ADJCALLSTACKDOWN, VE::ADJCALLSTACKUP), RI() {}
 
 static bool IsIntegerCC(unsigned CC) { return (CC < VECC::CC_AF); }
 
-static VECC::CondCodes GetOppositeBranchCondition(VECC::CondCodes CC) {
-  switch(CC) {
-  case VECC::CC_IG:     return VECC::CC_ILE;
-  case VECC::CC_IL:     return VECC::CC_IGE;
-  case VECC::CC_INE:    return VECC::CC_IEQ;
-  case VECC::CC_IEQ:    return VECC::CC_INE;
-  case VECC::CC_IGE:    return VECC::CC_IL;
-  case VECC::CC_ILE:    return VECC::CC_IG;
-  case VECC::CC_AF:     return VECC::CC_AT;
-  case VECC::CC_G:      return VECC::CC_LENAN;
-  case VECC::CC_L:      return VECC::CC_GENAN;
-  case VECC::CC_NE:     return VECC::CC_EQNAN;
-  case VECC::CC_EQ:     return VECC::CC_NENAN;
-  case VECC::CC_GE:     return VECC::CC_LNAN;
-  case VECC::CC_LE:     return VECC::CC_GNAN;
-  case VECC::CC_NUM:    return VECC::CC_NAN;
-  case VECC::CC_NAN:    return VECC::CC_NUM;
-  case VECC::CC_GNAN:   return VECC::CC_LE;
-  case VECC::CC_LNAN:   return VECC::CC_GE;
-  case VECC::CC_NENAN:  return VECC::CC_EQ;
-  case VECC::CC_EQNAN:  return VECC::CC_NE;
-  case VECC::CC_GENAN:  return VECC::CC_L;
-  case VECC::CC_LENAN:  return VECC::CC_G;
-  case VECC::CC_AT:     return VECC::CC_AF;
+static VECC::CondCode GetOppositeBranchCondition(VECC::CondCode CC) {
+  switch (CC) {
+  case VECC::CC_IG:
+    return VECC::CC_ILE;
+  case VECC::CC_IL:
+    return VECC::CC_IGE;
+  case VECC::CC_INE:
+    return VECC::CC_IEQ;
+  case VECC::CC_IEQ:
+    return VECC::CC_INE;
+  case VECC::CC_IGE:
+    return VECC::CC_IL;
+  case VECC::CC_ILE:
+    return VECC::CC_IG;
+  case VECC::CC_AF:
+    return VECC::CC_AT;
+  case VECC::CC_G:
+    return VECC::CC_LENAN;
+  case VECC::CC_L:
+    return VECC::CC_GENAN;
+  case VECC::CC_NE:
+    return VECC::CC_EQNAN;
+  case VECC::CC_EQ:
+    return VECC::CC_NENAN;
+  case VECC::CC_GE:
+    return VECC::CC_LNAN;
+  case VECC::CC_LE:
+    return VECC::CC_GNAN;
+  case VECC::CC_NUM:
+    return VECC::CC_NAN;
+  case VECC::CC_NAN:
+    return VECC::CC_NUM;
+  case VECC::CC_GNAN:
+    return VECC::CC_LE;
+  case VECC::CC_LNAN:
+    return VECC::CC_GE;
+  case VECC::CC_NENAN:
+    return VECC::CC_EQ;
+  case VECC::CC_EQNAN:
+    return VECC::CC_NE;
+  case VECC::CC_GENAN:
+    return VECC::CC_L;
+  case VECC::CC_LENAN:
+    return VECC::CC_G;
+  case VECC::CC_AT:
+    return VECC::CC_AF;
+  case VECC::UNKNOWN:
+    return VECC::UNKNOWN;
   }
   llvm_unreachable("Invalid cond code");
 }
 
-// Treat br.l [BCR AT] as unconditional branch
+// Treat br.l [BRCF AT] as unconditional branch
 static bool isUncondBranchOpcode(int Opc) {
-  return Opc == VE::BCRLa || Opc == VE::BCRWa ||
-         Opc == VE::BCRDa || Opc == VE::BCRSa;
+  return Opc == VE::BRCFLa    || Opc == VE::BRCFWa    ||
+         Opc == VE::BRCFLa_nt || Opc == VE::BRCFWa_nt ||
+         Opc == VE::BRCFLa_t  || Opc == VE::BRCFWa_t  ||
+         Opc == VE::BRCFDa    || Opc == VE::BRCFSa    ||
+         Opc == VE::BRCFDa_nt || Opc == VE::BRCFSa_nt ||
+         Opc == VE::BRCFDa_t  || Opc == VE::BRCFSa_t;
 }
 
 static bool isCondBranchOpcode(int Opc) {
-  return Opc == VE::BCRLrr  || Opc == VE::BCRLir  ||
-         Opc == VE::BCRLrm0 || Opc == VE::BCRLrm1 ||
-         Opc == VE::BCRLim0 || Opc == VE::BCRLim1 ||
-         Opc == VE::BCRWrr  || Opc == VE::BCRWir  ||
-         Opc == VE::BCRWrm0 || Opc == VE::BCRWrm1 ||
-         Opc == VE::BCRWim0 || Opc == VE::BCRWim1 ||
-         Opc == VE::BCRDrr  || Opc == VE::BCRDir  ||
-         Opc == VE::BCRDrm0 || Opc == VE::BCRDrm1 ||
-         Opc == VE::BCRDim0 || Opc == VE::BCRDim1 ||
-         Opc == VE::BCRSrr  || Opc == VE::BCRSir  ||
-         Opc == VE::BCRSrm0 || Opc == VE::BCRSrm1 ||
-         Opc == VE::BCRSim0 || Opc == VE::BCRSim1;
+  return Opc == VE::BRCFLrr    || Opc == VE::BRCFLir    ||
+         Opc == VE::BRCFLrr_nt || Opc == VE::BRCFLir_nt ||
+         Opc == VE::BRCFLrr_t  || Opc == VE::BRCFLir_t  ||
+         Opc == VE::BRCFWrr    || Opc == VE::BRCFWir    ||
+         Opc == VE::BRCFWrr_nt || Opc == VE::BRCFWir_nt ||
+         Opc == VE::BRCFWrr_t  || Opc == VE::BRCFWir_t  ||
+         Opc == VE::BRCFDrr    || Opc == VE::BRCFDir    ||
+         Opc == VE::BRCFDrr_nt || Opc == VE::BRCFDir_nt ||
+         Opc == VE::BRCFDrr_t  || Opc == VE::BRCFDir_t  ||
+         Opc == VE::BRCFSrr    || Opc == VE::BRCFSir    ||
+         Opc == VE::BRCFSrr_nt || Opc == VE::BRCFSir_nt ||
+         Opc == VE::BRCFSrr_t  || Opc == VE::BRCFSir_t;
+}
+
+static bool isIndirectBranchOpcode(int Opc) {
+  return Opc == VE::BCFLari    || Opc == VE::BCFLari    ||
+         Opc == VE::BCFLari_nt || Opc == VE::BCFLari_nt ||
+         Opc == VE::BCFLari_t  || Opc == VE::BCFLari_t  ||
+         Opc == VE::BCFLari    || Opc == VE::BCFLari    ||
+         Opc == VE::BCFLari_nt || Opc == VE::BCFLari_nt ||
+         Opc == VE::BCFLari_t  || Opc == VE::BCFLari_t;
 }
 
 static void parseCondBranch(MachineInstr *LastInst, MachineBasicBlock *&Target,
@@ -97,11 +134,10 @@ static void parseCondBranch(MachineInstr *LastInst, MachineBasicBlock *&Target,
   Target = LastInst->getOperand(3).getMBB();
 }
 
-bool VEInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
-                                   MachineBasicBlock *&TBB,
-                                   MachineBasicBlock *&FBB,
-                                   SmallVectorImpl<MachineOperand> &Cond,
-                                   bool AllowModify) const {
+bool VEInstrInfo::analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
+                                MachineBasicBlock *&FBB,
+                                SmallVectorImpl<MachineOperand> &Cond,
+                                bool AllowModify) const {
   MachineBasicBlock::iterator I = MBB.getLastNonDebugInstr();
   if (I == MBB.end())
     return false;
@@ -166,25 +202,24 @@ bool VEInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
     return false;
   }
 
-  // TODO ...likewise if it ends with an indirect branch followed by an unconditional
+  // ...likewise if it ends with an indirect branch followed by an unconditional
   // branch.
-  // if (isIndirectBranchOpcode(SecondLastOpc) && isUncondBranchOpcode(LastOpc)) {
-  //   I = LastInst;
-  //   if (AllowModify)
-  //     I->eraseFromParent();
-  //   return true;
-  // }
+  if (isIndirectBranchOpcode(SecondLastOpc) && isUncondBranchOpcode(LastOpc)) {
+    I = LastInst;
+    if (AllowModify)
+      I->eraseFromParent();
+    return true;
+  }
 
   // Otherwise, can't handle this.
   return true;
 }
 
 unsigned VEInstrInfo::insertBranch(MachineBasicBlock &MBB,
-                                      MachineBasicBlock *TBB,
-                                      MachineBasicBlock *FBB,
-                                      ArrayRef<MachineOperand> Cond,
-                                      const DebugLoc &DL,
-                                      int *BytesAdded) const {
+                                   MachineBasicBlock *TBB,
+                                   MachineBasicBlock *FBB,
+                                   ArrayRef<MachineOperand> Cond,
+                                   const DebugLoc &DL, int *BytesAdded) const {
   assert(TBB && "insertBranch must not be told to insert a fallthrough");
   assert((Cond.size() == 3 || Cond.size() == 0) &&
          "VE branch conditions should have three component!");
@@ -192,13 +227,13 @@ unsigned VEInstrInfo::insertBranch(MachineBasicBlock &MBB,
   if (Cond.empty()) {
     // Uncondition branch
     assert(!FBB && "Unconditional branch with multiple successors!");
-    BuildMI(&MBB, DL, get(VE::BCRLa))
+    BuildMI(&MBB, DL, get(VE::BRCFLa_t))
         .addMBB(TBB);
     return 1;
   }
 
   // Conditional branch
-  //   (BCRir CC sy sz addr)
+  //   (BRCFir CC sy sz addr)
   assert(Cond[0].isImm() && Cond[2].isReg() && "not implemented");
 
   unsigned opc[2];
@@ -208,19 +243,19 @@ unsigned VEInstrInfo::insertBranch(MachineBasicBlock &MBB,
   unsigned Reg = Cond[2].getReg();
   if (IsIntegerCC(Cond[0].getImm())) {
     if (TRI->getRegSizeInBits(Reg, MRI) == 32) {
-      opc[0] = VE::BCRWir;
-      opc[1] = VE::BCRWrr;
+      opc[0] = VE::BRCFWir;
+      opc[1] = VE::BRCFWrr;
     } else {
-      opc[0] = VE::BCRLir;
-      opc[1] = VE::BCRLrr;
+      opc[0] = VE::BRCFLir;
+      opc[1] = VE::BRCFLrr;
     }
   } else {
     if (TRI->getRegSizeInBits(Reg, MRI) == 32) {
-      opc[0] = VE::BCRSir;
-      opc[1] = VE::BCRSrr;
+      opc[0] = VE::BRCFSir;
+      opc[1] = VE::BRCFSrr;
     } else {
-      opc[0] = VE::BCRDir;
-      opc[1] = VE::BCRDrr;
+      opc[0] = VE::BRCFDir;
+      opc[1] = VE::BRCFDrr;
     }
   }
   if (Cond[1].isImm()) {
@@ -240,7 +275,7 @@ unsigned VEInstrInfo::insertBranch(MachineBasicBlock &MBB,
   if (!FBB)
     return 1;
 
-  BuildMI(&MBB, DL, get(VE::BCRLa))
+  BuildMI(&MBB, DL, get(VE::BRCFLa_t))
       .addMBB(FBB);
   return 2;
 }
@@ -270,15 +305,42 @@ unsigned VEInstrInfo::removeBranch(MachineBasicBlock &MBB,
 
 bool VEInstrInfo::reverseBranchCondition(
     SmallVectorImpl<MachineOperand> &Cond) const {
-  VECC::CondCodes CC = static_cast<VECC::CondCodes>(Cond[0].getImm());
+  VECC::CondCode CC = static_cast<VECC::CondCode>(Cond[0].getImm());
   Cond[0].setImm(GetOppositeBranchCondition(CC));
   return false;
 }
 
 static bool IsAliasOfSX(Register Reg) {
-  return VE::I8RegClass.contains(Reg) || VE::I16RegClass.contains(Reg) ||
-         VE::I32RegClass.contains(Reg) || VE::I64RegClass.contains(Reg) ||
+  return VE::I32RegClass.contains(Reg) || VE::I64RegClass.contains(Reg) ||
          VE::F32RegClass.contains(Reg);
+}
+
+static void copyPhysSubRegs(MachineBasicBlock &MBB,
+                            MachineBasicBlock::iterator I, const DebugLoc &DL,
+                            MCRegister DestReg, MCRegister SrcReg, bool KillSrc,
+                            const MCInstrDesc &MCID, unsigned int NumSubRegs,
+                            const unsigned *SubRegIdx,
+                            const TargetRegisterInfo *TRI) {
+  MachineInstr *MovMI = nullptr;
+
+  for (unsigned Idx = 0; Idx != NumSubRegs; ++Idx) {
+    Register SubDest = TRI->getSubReg(DestReg, SubRegIdx[Idx]);
+    Register SubSrc = TRI->getSubReg(SrcReg, SubRegIdx[Idx]);
+    assert(SubDest && SubSrc && "Bad sub-register");
+
+    if (MCID.getOpcode() == VE::ORri) {
+      // generate "ORri, dest, src, 0" instruction.
+      MachineInstrBuilder MIB =
+          BuildMI(MBB, I, DL, MCID, SubDest).addReg(SubSrc).addImm(0);
+      MovMI = MIB.getInstr();
+    } else {
+      llvm_unreachable("Unexpected reg-to-reg copy instruction");
+    }
+  }
+  // Add implicit super-register defs and kills to the last MovMI.
+  MovMI->addRegisterDefined(DestReg, TRI);
+  if (KillSrc)
+    MovMI->addRegisterKilled(SrcReg, TRI, true);
 }
 
 void VEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
@@ -290,12 +352,172 @@ void VEInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     BuildMI(MBB, I, DL, get(VE::ORri), DestReg)
         .addReg(SrcReg, getKillRegState(KillSrc))
         .addImm(0);
+  } else if (VE::F128RegClass.contains(DestReg, SrcReg)) {
+    // Use two instructions.
+    const unsigned SubRegIdx[] = {VE::sub_even, VE::sub_odd};
+    unsigned int NumSubRegs = 2;
+    copyPhysSubRegs(MBB, I, DL, DestReg, SrcReg, KillSrc, get(VE::ORri),
+                    NumSubRegs, SubRegIdx, &getRegisterInfo());
   } else {
     const TargetRegisterInfo *TRI = &getRegisterInfo();
     dbgs() << "Impossible reg-to-reg copy from " << printReg(SrcReg, TRI)
            << " to " << printReg(DestReg, TRI) << "\n";
     llvm_unreachable("Impossible reg-to-reg copy");
   }
+}
+
+/// isLoadFromStackSlot - If the specified machine instruction is a direct
+/// load from a stack slot, return the virtual or physical register number of
+/// the destination along with the FrameIndex of the loaded stack slot.  If
+/// not, return 0.  This predicate must return 0 if the instruction has
+/// any side effects other than loading from the stack slot.
+unsigned VEInstrInfo::isLoadFromStackSlot(const MachineInstr &MI,
+                                          int &FrameIndex) const {
+  if (MI.getOpcode() == VE::LDrii ||    // I64
+      MI.getOpcode() == VE::LDLSXrii || // I32
+      MI.getOpcode() == VE::LDUrii ||   // F32
+      MI.getOpcode() == VE::LDQrii      // F128 (pseudo)
+  ) {
+    if (MI.getOperand(1).isFI() && MI.getOperand(2).isImm() &&
+        MI.getOperand(2).getImm() == 0 && MI.getOperand(3).isImm() &&
+        MI.getOperand(3).getImm() == 0) {
+      FrameIndex = MI.getOperand(1).getIndex();
+      return MI.getOperand(0).getReg();
+    }
+  }
+  return 0;
+}
+
+/// isStoreToStackSlot - If the specified machine instruction is a direct
+/// store to a stack slot, return the virtual or physical register number of
+/// the source reg along with the FrameIndex of the loaded stack slot.  If
+/// not, return 0.  This predicate must return 0 if the instruction has
+/// any side effects other than storing to the stack slot.
+unsigned VEInstrInfo::isStoreToStackSlot(const MachineInstr &MI,
+                                         int &FrameIndex) const {
+  if (MI.getOpcode() == VE::STrii ||  // I64
+      MI.getOpcode() == VE::STLrii || // I32
+      MI.getOpcode() == VE::STUrii || // F32
+      MI.getOpcode() == VE::STQrii    // F128 (pseudo)
+  ) {
+    if (MI.getOperand(0).isFI() && MI.getOperand(1).isImm() &&
+        MI.getOperand(1).getImm() == 0 && MI.getOperand(2).isImm() &&
+        MI.getOperand(2).getImm() == 0) {
+      FrameIndex = MI.getOperand(0).getIndex();
+      return MI.getOperand(3).getReg();
+    }
+  }
+  return 0;
+}
+
+void VEInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
+                                      MachineBasicBlock::iterator I,
+                                      Register SrcReg, bool isKill, int FI,
+                                      const TargetRegisterClass *RC,
+                                      const TargetRegisterInfo *TRI) const {
+  DebugLoc DL;
+  if (I != MBB.end())
+    DL = I->getDebugLoc();
+
+  MachineFunction *MF = MBB.getParent();
+  const MachineFrameInfo &MFI = MF->getFrameInfo();
+  MachineMemOperand *MMO = MF->getMachineMemOperand(
+      MachinePointerInfo::getFixedStack(*MF, FI), MachineMemOperand::MOStore,
+      MFI.getObjectSize(FI), MFI.getObjectAlign(FI));
+
+  // On the order of operands here: think "[FrameIdx + 0] = SrcReg".
+  if (RC == &VE::I64RegClass) {
+    BuildMI(MBB, I, DL, get(VE::STrii))
+        .addFrameIndex(FI)
+        .addImm(0)
+        .addImm(0)
+        .addReg(SrcReg, getKillRegState(isKill))
+        .addMemOperand(MMO);
+  } else if (RC == &VE::I32RegClass) {
+    BuildMI(MBB, I, DL, get(VE::STLrii))
+        .addFrameIndex(FI)
+        .addImm(0)
+        .addImm(0)
+        .addReg(SrcReg, getKillRegState(isKill))
+        .addMemOperand(MMO);
+  } else if (RC == &VE::F32RegClass) {
+    BuildMI(MBB, I, DL, get(VE::STUrii))
+        .addFrameIndex(FI)
+        .addImm(0)
+        .addImm(0)
+        .addReg(SrcReg, getKillRegState(isKill))
+        .addMemOperand(MMO);
+  } else if (VE::F128RegClass.hasSubClassEq(RC)) {
+    BuildMI(MBB, I, DL, get(VE::STQrii))
+        .addFrameIndex(FI)
+        .addImm(0)
+        .addImm(0)
+        .addReg(SrcReg, getKillRegState(isKill))
+        .addMemOperand(MMO);
+  } else
+    report_fatal_error("Can't store this register to stack slot");
+}
+
+void VEInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
+                                       MachineBasicBlock::iterator I,
+                                       Register DestReg, int FI,
+                                       const TargetRegisterClass *RC,
+                                       const TargetRegisterInfo *TRI) const {
+  DebugLoc DL;
+  if (I != MBB.end())
+    DL = I->getDebugLoc();
+
+  MachineFunction *MF = MBB.getParent();
+  const MachineFrameInfo &MFI = MF->getFrameInfo();
+  MachineMemOperand *MMO = MF->getMachineMemOperand(
+      MachinePointerInfo::getFixedStack(*MF, FI), MachineMemOperand::MOLoad,
+      MFI.getObjectSize(FI), MFI.getObjectAlign(FI));
+
+  if (RC == &VE::I64RegClass) {
+    BuildMI(MBB, I, DL, get(VE::LDrii), DestReg)
+        .addFrameIndex(FI)
+        .addImm(0)
+        .addImm(0)
+        .addMemOperand(MMO);
+  } else if (RC == &VE::I32RegClass) {
+    BuildMI(MBB, I, DL, get(VE::LDLSXrii), DestReg)
+        .addFrameIndex(FI)
+        .addImm(0)
+        .addImm(0)
+        .addMemOperand(MMO);
+  } else if (RC == &VE::F32RegClass) {
+    BuildMI(MBB, I, DL, get(VE::LDUrii), DestReg)
+        .addFrameIndex(FI)
+        .addImm(0)
+        .addImm(0)
+        .addMemOperand(MMO);
+  } else if (VE::F128RegClass.hasSubClassEq(RC)) {
+    BuildMI(MBB, I, DL, get(VE::LDQrii), DestReg)
+        .addFrameIndex(FI)
+        .addImm(0)
+        .addImm(0)
+        .addMemOperand(MMO);
+  } else
+    report_fatal_error("Can't load this register from stack slot");
+}
+
+Register VEInstrInfo::getGlobalBaseReg(MachineFunction *MF) const {
+  VEMachineFunctionInfo *VEFI = MF->getInfo<VEMachineFunctionInfo>();
+  Register GlobalBaseReg = VEFI->getGlobalBaseReg();
+  if (GlobalBaseReg != 0)
+    return GlobalBaseReg;
+
+  // We use %s15 (%got) as a global base register
+  GlobalBaseReg = VE::SX15;
+
+  // Insert a pseudo instruction to set the GlobalBaseReg into the first
+  // MBB of the function
+  MachineBasicBlock &FirstMBB = MF->front();
+  MachineBasicBlock::iterator MBBI = FirstMBB.begin();
+  DebugLoc dl;
+  BuildMI(FirstMBB, MBBI, dl, get(VE::GETGOT), GlobalBaseReg);
+  VEFI->setGlobalBaseReg(GlobalBaseReg);
+  return GlobalBaseReg;
 }
 
 bool VEInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
@@ -307,6 +529,9 @@ bool VEInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
     MI.eraseFromParent(); // The pseudo instruction is gone now.
     return true;
   }
+  case VE::GETSTACKTOP: {
+    return expandGetStackTopPseudo(MI);
+  }
   }
   return false;
 }
@@ -314,8 +539,8 @@ bool VEInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
 bool VEInstrInfo::expandExtendStackPseudo(MachineInstr &MI) const {
   MachineBasicBlock &MBB = *MI.getParent();
   MachineFunction &MF = *MBB.getParent();
-  const VEInstrInfo &TII =
-      *static_cast<const VEInstrInfo *>(MF.getSubtarget().getInstrInfo());
+  const VESubtarget &STI = MF.getSubtarget<VESubtarget>();
+  const VEInstrInfo &TII = *STI.getInstrInfo();
   DebugLoc dl = MBB.findDebugLoc(MI);
 
   // Create following instructions and multiple basic blocks.
@@ -351,7 +576,7 @@ bool VEInstrInfo::expandExtendStackPseudo(MachineInstr &MI) const {
   // Next, add the true and fallthrough blocks as its successors.
   BB->addSuccessor(syscallMBB);
   BB->addSuccessor(sinkMBB);
-  BuildMI(BB, dl, TII.get(VE::BCRLrr))
+  BuildMI(BB, dl, TII.get(VE::BRCFLrr_t))
       .addImm(VECC::CC_IGE)
       .addReg(VE::SX11) // %sp
       .addReg(VE::SX8)  // %sl
@@ -362,23 +587,26 @@ bool VEInstrInfo::expandExtendStackPseudo(MachineInstr &MI) const {
   // Update machine-CFG edges
   BB->addSuccessor(sinkMBB);
 
-  BuildMI(BB, dl, TII.get(VE::LDSri), VE::SX61)
+  BuildMI(BB, dl, TII.get(VE::LDrii), VE::SX61)
       .addReg(VE::SX14)
+      .addImm(0)
       .addImm(0x18);
   BuildMI(BB, dl, TII.get(VE::ORri), VE::SX62)
       .addReg(VE::SX0)
       .addImm(0);
-  BuildMI(BB, dl, TII.get(VE::LEAzzi), VE::SX63)
+  BuildMI(BB, dl, TII.get(VE::LEAzii), VE::SX63)
+      .addImm(0)
+      .addImm(0)
       .addImm(0x13b);
-  BuildMI(BB, dl, TII.get(VE::SHMri))
+  BuildMI(BB, dl, TII.get(VE::SHMLri))
       .addReg(VE::SX61)
       .addImm(0)
       .addReg(VE::SX63);
-  BuildMI(BB, dl, TII.get(VE::SHMri))
+  BuildMI(BB, dl, TII.get(VE::SHMLri))
       .addReg(VE::SX61)
       .addImm(8)
       .addReg(VE::SX8);
-  BuildMI(BB, dl, TII.get(VE::SHMri))
+  BuildMI(BB, dl, TII.get(VE::SHMLri))
       .addReg(VE::SX61)
       .addImm(16)
       .addReg(VE::SX11);
@@ -387,6 +615,38 @@ bool VEInstrInfo::expandExtendStackPseudo(MachineInstr &MI) const {
   BuildMI(BB, dl, TII.get(VE::ORri), VE::SX0)
       .addReg(VE::SX62)
       .addImm(0);
+
+  MI.eraseFromParent(); // The pseudo instruction is gone now.
+  return true;
+}
+
+bool VEInstrInfo::expandGetStackTopPseudo(MachineInstr &MI) const {
+  MachineBasicBlock *MBB = MI.getParent();
+  MachineFunction &MF = *MBB->getParent();
+  const VESubtarget &STI = MF.getSubtarget<VESubtarget>();
+  const VEInstrInfo &TII = *STI.getInstrInfo();
+  DebugLoc DL = MBB->findDebugLoc(MI);
+
+  // Create following instruction
+  //
+  //   dst = %sp + target specific frame + the size of parameter area
+
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  const VEFrameLowering &TFL = *STI.getFrameLowering();
+
+  // The VE ABI requires a reserved 176 bytes area at the top
+  // of stack as described in VESubtarget.cpp.  So, we adjust it here.
+  unsigned NumBytes = STI.getAdjustedFrameSize(0);
+
+  // Also adds the size of parameter area.
+  if (MFI.adjustsStack() && TFL.hasReservedCallFrame(MF))
+    NumBytes += MFI.getMaxCallFrameSize();
+
+  BuildMI(*MBB, MI, DL, TII.get(VE::LEArii))
+      .addDef(MI.getOperand(0).getReg())
+      .addReg(VE::SX11)
+      .addImm(0)
+      .addImm(NumBytes);
 
   MI.eraseFromParent(); // The pseudo instruction is gone now.
   return true;

@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/GPU/Passes.h"
+#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
 
@@ -18,15 +19,22 @@ using namespace mlir;
 
 namespace {
 struct TestAllReduceLoweringPass
-    : public ModulePass<TestAllReduceLoweringPass> {
-  void runOnModule() override {
+    : public PassWrapper<TestAllReduceLoweringPass, OperationPass<ModuleOp>> {
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<StandardOpsDialect>();
+  }
+  void runOnOperation() override {
     OwningRewritePatternList patterns;
     populateGpuRewritePatterns(&getContext(), patterns);
-    applyPatternsGreedily(getModule(), patterns);
+    applyPatternsAndFoldGreedily(getOperation(), patterns);
   }
 };
 } // namespace
 
-static PassRegistration<TestAllReduceLoweringPass>
-    pass("test-all-reduce-lowering",
-         "Lowers gpu.all-reduce ops within the GPU dialect.");
+namespace mlir {
+void registerTestAllReduceLoweringPass() {
+  PassRegistration<TestAllReduceLoweringPass> pass(
+      "test-all-reduce-lowering",
+      "Lowers gpu.all-reduce ops within the GPU dialect.");
+}
+} // namespace mlir

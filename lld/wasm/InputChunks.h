@@ -57,6 +57,8 @@ public:
   void writeRelocations(llvm::raw_ostream &os) const;
 
   ObjFile *file;
+  OutputSection *outputSec = nullptr;
+  // Offset withing the output section
   int32_t outputOffset = 0;
 
   // Signals that the section is part of the output.  The garbage collector,
@@ -130,8 +132,8 @@ public:
   void writeTo(uint8_t *sectionStart) const override;
   StringRef getName() const override { return function->SymbolName; }
   StringRef getDebugName() const override { return function->DebugName; }
-  StringRef getExportName() const {
-    return function ? function->ExportName : "";
+  llvm::Optional<StringRef> getExportName() const {
+    return function ? function->ExportName : llvm::Optional<StringRef>();
   }
   uint32_t getComdat() const override { return function->Comdat; }
   uint32_t getFunctionInputOffset() const { return getInputSectionOffset(); }
@@ -213,8 +215,6 @@ public:
   StringRef getName() const override { return section.Name; }
   StringRef getDebugName() const override { return StringRef(); }
   uint32_t getComdat() const override { return UINT32_MAX; }
-
-  OutputSection *outputSec = nullptr;
 
 protected:
   ArrayRef<uint8_t> data() const override { return section.Content; }

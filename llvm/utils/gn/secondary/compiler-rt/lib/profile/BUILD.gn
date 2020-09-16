@@ -37,6 +37,7 @@ static_library("profile") {
     "InstrProfilingBiasVar.c",
     "InstrProfilingBuffer.c",
     "InstrProfilingFile.c",
+    "InstrProfilingInternal.c",
     "InstrProfilingInternal.h",
     "InstrProfilingMerge.c",
     "InstrProfilingMergeFile.c",
@@ -51,6 +52,7 @@ static_library("profile") {
     "InstrProfilingUtil.c",
     "InstrProfilingUtil.h",
     "InstrProfilingValue.c",
+    "InstrProfilingVersionVar.c",
     "InstrProfilingWriter.c",
   ]
   if (current_os == "win") {
@@ -62,9 +64,9 @@ static_library("profile") {
 
   if (current_os != "win") {
     defines = [
-      "COMPILER_RT_TARGET_HAS_ATOMICS",
-      "COMPILER_RT_TARGET_HAS_FCNTL_LCK",
-      "COMPILER_RT_TARGET_HAS_UNAME",
+      "COMPILER_RT_HAS_UNAME",
+      "COMPILER_RT_HAS_ATOMICS",
+      "COMPILER_RT_HAS_FCNTL_LCK",
     ]
   }
 }

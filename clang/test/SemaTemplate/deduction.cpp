@@ -564,3 +564,36 @@ namespace nested_packs {
   }
 #endif
 }
+
+namespace PR44890 {
+  template<typename ...Ts>
+    struct tuple {};
+
+  template<int I, typename ...Ts>
+    int get0(const tuple<Ts...> &t) { return 0; }
+
+  template<typename ...Ts> struct tuple_wrapper : tuple<Ts...> {
+    template<int I> int get() { return get0<0, Ts...>(*this); }
+  };
+
+  int f() {
+    tuple_wrapper<int> w;
+    return w.get<0>();
+  }
+}
+
+namespace merge_size_only_deductions {
+#if __cplusplus >= 201703L
+  // Based on a testcase by Hubert Tong.
+  template<typename ...> struct X {};
+  template<auto ...> struct Y {};
+  template<typename T> struct id { using Type = T; };
+
+  template<typename ...T, typename T::Type ...V>
+    int f(X<char [V] ...>, Y<V ...>, X<T ...>);
+
+  using size_t = __SIZE_TYPE__;
+  int a = f(X<char [1], char [2]>(), Y<(size_t)1, (size_t)2>(), X<id<size_t>, id<size_t>>());
+  int b = f(X<char [1], char [2]>(), Y<1, 2>(), X<id<int>, id<int>>());
+#endif
+}

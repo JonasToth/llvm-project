@@ -13,6 +13,7 @@
 
 #include "lldb/API/SBBreakpoint.h"
 #include "lldb/API/SBDebugger.h"
+#include "lldb/API/SBEnvironment.h"
 #include "lldb/API/SBEvent.h"
 #include "lldb/API/SBExpressionOptions.h"
 #include "lldb/API/SBFileSpec.h"
@@ -118,7 +119,7 @@ const SBTarget &SBTarget::operator=(const SBTarget &rhs) {
 }
 
 // Destructor
-SBTarget::~SBTarget() {}
+SBTarget::~SBTarget() = default;
 
 bool SBTarget::EventIsTargetEvent(const SBEvent &event) {
   LLDB_RECORD_STATIC_METHOD(bool, SBTarget, EventIsTargetEvent,
@@ -286,16 +287,24 @@ SBProcess SBTarget::LaunchSimple(char const **argv, char const **envp,
                      (const char **, const char **, const char *), argv, envp,
                      working_directory);
 
-  char *stdin_path = nullptr;
-  char *stdout_path = nullptr;
-  char *stderr_path = nullptr;
-  uint32_t launch_flags = 0;
-  bool stop_at_entry = false;
+  TargetSP target_sp = GetSP();
+  if (!target_sp)
+    return LLDB_RECORD_RESULT(SBProcess());
+
+  SBLaunchInfo launch_info = GetLaunchInfo();
+
+  if (Module *exe_module = target_sp->GetExecutableModulePointer())
+    launch_info.SetExecutableFile(exe_module->GetPlatformFileSpec(),
+                                  /*add_as_first_arg*/ true);
+  if (argv)
+    launch_info.SetArguments(argv, /*append*/ true);
+  if (envp)
+    launch_info.SetEnvironmentEntries(envp, /*append*/ false);
+  if (working_directory)
+    launch_info.SetWorkingDirectory(working_directory);
+
   SBError error;
-  SBListener listener = GetDebugger().GetListener();
-  return LLDB_RECORD_RESULT(Launch(listener, argv, envp, stdin_path,
-                                   stdout_path, stderr_path, working_directory,
-                                   launch_flags, stop_at_entry, error));
+  return LLDB_RECORD_RESULT(Launch(launch_info, error));
 }
 
 SBError SBTarget::Install() {
@@ -371,10 +380,19 @@ SBProcess SBTarget::Launch(SBListener &listener, char const **argv,
     Module *exe_module = target_sp->GetExecutableModulePointer();
     if (exe_module)
       launch_info.SetExecutableFile(exe_module->GetPlatformFileSpec(), true);
-    if (argv)
+    if (argv) {
       launch_info.GetArguments().AppendArguments(argv);
-    if (envp)
+    } else {
+      auto default_launch_info = target_sp->GetProcessLaunchInfo();
+      launch_info.GetArguments().AppendArguments(
+          default_launch_info.GetArguments());
+    }
+    if (envp) {
       launch_info.GetEnvironment() = Environment(envp);
+    } else {
+      auto default_launch_info = target_sp->GetProcessLaunchInfo();
+      launch_info.GetEnvironment() = default_launch_info.GetEnvironment();
+    }
 
     if (listener.IsValid())
       launch_info.SetListener(listener.GetSP());
@@ -556,7 +574,7 @@ lldb::SBProcess SBTarget::ConnectRemote(SBListener &listener, const char *url,
 
     if (process_sp) {
       sb_process.SetSP(process_sp);
-      error.SetError(process_sp->ConnectRemote(nullptr, url));
+      error.SetError(process_sp->ConnectRemote(url));
     } else {
       error.SetErrorString("unable to create lldb_private::Process");
     }
@@ -677,9 +695,9 @@ SBTarget::ResolveSymbolContextForAddress(const SBAddress &addr,
 
 size_t SBTarget::ReadMemory(const SBAddress addr, void *buf, size_t size,
                             lldb::SBError &error) {
-  LLDB_RECORD_DUMMY(size_t, SBTarget, ReadMemory,
-                    (const lldb::SBAddress, void *, size_t, lldb::SBError &),
-                    addr, buf, size, error);
+  LLDB_RECORD_METHOD(size_t, SBTarget, ReadMemory,
+                     (const lldb::SBAddress, void *, size_t, lldb::SBError &),
+                     addr, buf, size, error);
 
   SBError sb_error;
   size_t bytes_read = 0;
@@ -1773,7 +1791,7 @@ lldb::SBSymbolContextList SBTarget::FindFunctions(const char *name,
                      (const char *, uint32_t), name, name_type_mask);
 
   lldb::SBSymbolContextList sb_sc_list;
-  if (!name | !name[0])
+  if (!name || !name[0])
     return LLDB_RECORD_RESULT(sb_sc_list);
 
   TargetSP target_sp(GetSP());
@@ -2054,21 +2072,22 @@ lldb::SBInstructionList SBTarget::ReadInstructions(lldb::SBAddress base_addr,
 lldb::SBInstructionList SBTarget::GetInstructions(lldb::SBAddress base_addr,
                                                   const void *buf,
                                                   size_t size) {
-  LLDB_RECORD_DUMMY(lldb::SBInstructionList, SBTarget, GetInstructions,
-                    (lldb::SBAddress, const void *, size_t), base_addr, buf,
-                    size);
+  LLDB_RECORD_METHOD(lldb::SBInstructionList, SBTarget, GetInstructions,
+                     (lldb::SBAddress, const void *, size_t), base_addr, buf,
+                     size);
 
-  return GetInstructionsWithFlavor(base_addr, nullptr, buf, size);
+  return LLDB_RECORD_RESULT(
+      GetInstructionsWithFlavor(base_addr, nullptr, buf, size));
 }
 
 lldb::SBInstructionList
 SBTarget::GetInstructionsWithFlavor(lldb::SBAddress base_addr,
                                     const char *flavor_string, const void *buf,
                                     size_t size) {
-  LLDB_RECORD_DUMMY(lldb::SBInstructionList, SBTarget,
-                    GetInstructionsWithFlavor,
-                    (lldb::SBAddress, const char *, const void *, size_t),
-                    base_addr, flavor_string, buf, size);
+  LLDB_RECORD_METHOD(lldb::SBInstructionList, SBTarget,
+                     GetInstructionsWithFlavor,
+                     (lldb::SBAddress, const char *, const void *, size_t),
+                     base_addr, flavor_string, buf, size);
 
   SBInstructionList sb_instructions;
 
@@ -2086,30 +2105,31 @@ SBTarget::GetInstructionsWithFlavor(lldb::SBAddress base_addr,
         UINT32_MAX, data_from_file));
   }
 
-  return sb_instructions;
+  return LLDB_RECORD_RESULT(sb_instructions);
 }
 
 lldb::SBInstructionList SBTarget::GetInstructions(lldb::addr_t base_addr,
                                                   const void *buf,
                                                   size_t size) {
-  LLDB_RECORD_DUMMY(lldb::SBInstructionList, SBTarget, GetInstructions,
-                    (lldb::addr_t, const void *, size_t), base_addr, buf, size);
+  LLDB_RECORD_METHOD(lldb::SBInstructionList, SBTarget, GetInstructions,
+                     (lldb::addr_t, const void *, size_t), base_addr, buf,
+                     size);
 
-  return GetInstructionsWithFlavor(ResolveLoadAddress(base_addr), nullptr, buf,
-                                   size);
+  return LLDB_RECORD_RESULT(GetInstructionsWithFlavor(
+      ResolveLoadAddress(base_addr), nullptr, buf, size));
 }
 
 lldb::SBInstructionList
 SBTarget::GetInstructionsWithFlavor(lldb::addr_t base_addr,
                                     const char *flavor_string, const void *buf,
                                     size_t size) {
-  LLDB_RECORD_DUMMY(lldb::SBInstructionList, SBTarget,
-                    GetInstructionsWithFlavor,
-                    (lldb::addr_t, const char *, const void *, size_t),
-                    base_addr, flavor_string, buf, size);
+  LLDB_RECORD_METHOD(lldb::SBInstructionList, SBTarget,
+                     GetInstructionsWithFlavor,
+                     (lldb::addr_t, const char *, const void *, size_t),
+                     base_addr, flavor_string, buf, size);
 
-  return GetInstructionsWithFlavor(ResolveLoadAddress(base_addr), flavor_string,
-                                   buf, size);
+  return LLDB_RECORD_RESULT(GetInstructionsWithFlavor(
+      ResolveLoadAddress(base_addr), flavor_string, buf, size));
 }
 
 SBError SBTarget::SetSectionLoadAddress(lldb::SBSection section,
@@ -2328,16 +2348,6 @@ lldb::SBValue SBTarget::EvaluateExpression(const char *expr,
     Target *target = exe_ctx.GetTargetPtr();
 
     if (target) {
-#ifdef LLDB_CONFIGURATION_DEBUG
-      StreamString frame_description;
-      if (frame)
-        frame->DumpUsingSettingsFormat(&frame_description);
-      llvm::PrettyStackTraceFormat stack_trace(
-          "SBTarget::EvaluateExpression (expr = \"%s\", fetch_dynamic_value = "
-          "%u) %s",
-          expr, options.GetFetchDynamicValue(),
-          frame_description.GetString().str().c_str());
-#endif
       target->EvaluateExpression(expr, frame, expr_value_sp, options.ref());
 
       expr_result.SetSP(expr_value_sp, options.GetFetchDynamicValue());
@@ -2384,6 +2394,17 @@ void SBTarget::SetLaunchInfo(const lldb::SBLaunchInfo &launch_info) {
   TargetSP target_sp(GetSP());
   if (target_sp)
     m_opaque_sp->SetProcessLaunchInfo(launch_info.ref());
+}
+
+SBEnvironment SBTarget::GetEnvironment() {
+  LLDB_RECORD_METHOD_NO_ARGS(lldb::SBEnvironment, SBTarget, GetEnvironment);
+  TargetSP target_sp(GetSP());
+
+  if (target_sp) {
+    return LLDB_RECORD_RESULT(SBEnvironment(target_sp->GetEnvironment()));
+  }
+
+  return LLDB_RECORD_RESULT(SBEnvironment());
 }
 
 namespace lldb_private {
@@ -2628,6 +2649,20 @@ void RegisterMethods<SBTarget>(Registry &R) {
   LLDB_REGISTER_METHOD_CONST(lldb::SBLaunchInfo, SBTarget, GetLaunchInfo, ());
   LLDB_REGISTER_METHOD(void, SBTarget, SetLaunchInfo,
                        (const lldb::SBLaunchInfo &));
+  LLDB_REGISTER_METHOD(
+      size_t, SBTarget, ReadMemory,
+      (const lldb::SBAddress, void *, size_t, lldb::SBError &));
+  LLDB_REGISTER_METHOD(lldb::SBInstructionList, SBTarget, GetInstructions,
+                       (lldb::SBAddress, const void *, size_t));
+  LLDB_REGISTER_METHOD(lldb::SBInstructionList, SBTarget,
+                       GetInstructionsWithFlavor,
+                       (lldb::SBAddress, const char *, const void *, size_t));
+  LLDB_REGISTER_METHOD(lldb::SBInstructionList, SBTarget, GetInstructions,
+                       (lldb::addr_t, const void *, size_t));
+  LLDB_REGISTER_METHOD(lldb::SBInstructionList, SBTarget,
+                       GetInstructionsWithFlavor,
+                       (lldb::addr_t, const char *, const void *, size_t));
+  LLDB_REGISTER_METHOD(lldb::SBEnvironment, SBTarget, GetEnvironment, ());
 }
 
 }

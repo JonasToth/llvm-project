@@ -143,15 +143,14 @@ Type::Type(lldb::user_id_t uid, SymbolFile *symbol_file, ConstString name,
            llvm::Optional<uint64_t> byte_size, SymbolContextScope *context,
            user_id_t encoding_uid, EncodingDataType encoding_uid_type,
            const Declaration &decl, const CompilerType &compiler_type,
-           ResolveState compiler_type_resolve_state)
+           ResolveState compiler_type_resolve_state, uint32_t opaque_payload)
     : std::enable_shared_from_this<Type>(), UserID(uid), m_name(name),
       m_symbol_file(symbol_file), m_context(context), m_encoding_type(nullptr),
       m_encoding_uid(encoding_uid), m_encoding_uid_type(encoding_uid_type),
       m_decl(decl), m_compiler_type(compiler_type),
-      m_compiler_type_resolve_state(
-          compiler_type ? compiler_type_resolve_state
-                        : ResolveState::Unresolved),
-      m_is_complete_objc_class(false) {
+      m_compiler_type_resolve_state(compiler_type ? compiler_type_resolve_state
+                                                  : ResolveState::Unresolved),
+      m_payload(opaque_payload) {
   if (byte_size) {
     m_byte_size = *byte_size;
     m_byte_size_has_value = true;
@@ -171,7 +170,7 @@ Type::Type()
 }
 
 void Type::GetDescription(Stream *s, lldb::DescriptionLevel level,
-                          bool show_name) {
+                          bool show_name, ExecutionContextScope *exe_scope) {
   *s << "id = " << (const UserID &)*this;
 
   // Call the name accessor to make sure we resolve the type name
@@ -187,7 +186,7 @@ void Type::GetDescription(Stream *s, lldb::DescriptionLevel level,
   }
 
   // Call the get byte size accesor so we resolve our byte size
-  if (GetByteSize())
+  if (GetByteSize(exe_scope))
     s->Printf(", byte-size = %" PRIu64, m_byte_size);
   bool show_fullpaths = (level == lldb::eDescriptionLevelVerbose);
   m_decl.Dump(s, show_fullpaths);
@@ -235,7 +234,7 @@ void Type::GetDescription(Stream *s, lldb::DescriptionLevel level,
   }
 }
 
-void Type::Dump(Stream *s, bool show_context) {
+void Type::Dump(Stream *s, bool show_context, lldb::DescriptionLevel level) {
   s->Printf("%p: ", static_cast<void *>(this));
   s->Indent();
   *s << "Type" << static_cast<const UserID &>(*this) << ' ';
@@ -256,7 +255,7 @@ void Type::Dump(Stream *s, bool show_context) {
 
   if (m_compiler_type.IsValid()) {
     *s << ", compiler_type = " << m_compiler_type.GetOpaqueQualType() << ' ';
-    GetForwardCompilerType().DumpTypeDescription(s);
+    GetForwardCompilerType().DumpTypeDescription(s, level);
   } else if (m_encoding_uid != LLDB_INVALID_UID) {
     s->Format(", type_data = {0:x-16}", m_encoding_uid);
     switch (m_encoding_uid_type) {
@@ -303,7 +302,7 @@ void Type::Dump(Stream *s, bool show_context) {
 
 ConstString Type::GetName() {
   if (!m_name)
-    m_name = GetForwardCompilerType().GetConstTypeName();
+    m_name = GetForwardCompilerType().GetTypeName();
   return m_name;
 }
 
@@ -313,7 +312,7 @@ void Type::DumpValue(ExecutionContext *exe_ctx, Stream *s,
                      const DataExtractor &data, uint32_t data_byte_offset,
                      bool show_types, bool show_summary, bool verbose,
                      lldb::Format format) {
-  if (ResolveClangType(ResolveState::Forward)) {
+  if (ResolveCompilerType(ResolveState::Forward)) {
     if (show_types) {
       s->PutChar('(');
       if (verbose)
@@ -324,7 +323,9 @@ void Type::DumpValue(ExecutionContext *exe_ctx, Stream *s,
 
     GetForwardCompilerType().DumpValue(
         exe_ctx, s, format == lldb::eFormatDefault ? GetFormat() : format, data,
-        data_byte_offset, GetByteSize().getValueOr(0),
+        data_byte_offset,
+        GetByteSize(exe_ctx ? exe_ctx->GetBestExecutionContextScope() : nullptr)
+            .getValueOr(0),
         0, // Bitfield bit size
         0, // Bitfield bit offset
         show_types, show_summary, verbose, 0);
@@ -337,7 +338,7 @@ Type *Type::GetEncodingType() {
   return m_encoding_type;
 }
 
-llvm::Optional<uint64_t> Type::GetByteSize() {
+llvm::Optional<uint64_t> Type::GetByteSize(ExecutionContextScope *exe_scope) {
   if (m_byte_size_has_value)
     return m_byte_size;
 
@@ -353,14 +354,14 @@ llvm::Optional<uint64_t> Type::GetByteSize() {
   case eEncodingIsTypedefUID: {
     Type *encoding_type = GetEncodingType();
     if (encoding_type)
-      if (llvm::Optional<uint64_t> size = encoding_type->GetByteSize()) {
+      if (llvm::Optional<uint64_t> size = encoding_type->GetByteSize(exe_scope)) {
         m_byte_size = *size;
         m_byte_size_has_value = true;
         return m_byte_size;
       }
 
     if (llvm::Optional<uint64_t> size =
-            GetLayoutCompilerType().GetByteSize(nullptr)) {
+            GetLayoutCompilerType().GetByteSize(exe_scope)) {
       m_byte_size = *size;
       m_byte_size_has_value = true;
         return m_byte_size;
@@ -374,6 +375,7 @@ llvm::Optional<uint64_t> Type::GetByteSize() {
       if (ArchSpec arch = m_symbol_file->GetObjectFile()->GetArchitecture()) {
         m_byte_size = arch.GetAddressByteSize();
         m_byte_size_has_value = true;
+        return m_byte_size;
       }
     } break;
   }
@@ -431,7 +433,9 @@ bool Type::ReadFromMemory(ExecutionContext *exe_ctx, lldb::addr_t addr,
     return false;
   }
 
-  const uint64_t byte_size = GetByteSize().getValueOr(0);
+  const uint64_t byte_size =
+      GetByteSize(exe_ctx ? exe_ctx->GetBestExecutionContextScope() : nullptr)
+          .getValueOr(0);
   if (data.GetByteSize() < byte_size) {
     lldb::DataBufferSP data_sp(new DataBufferHeap(byte_size, '\0'));
     data.SetData(data_sp);
@@ -466,7 +470,7 @@ bool Type::WriteToMemory(ExecutionContext *exe_ctx, lldb::addr_t addr,
 
 const Declaration &Type::GetDeclaration() const { return m_decl; }
 
-bool Type::ResolveClangType(ResolveState compiler_type_resolve_state) {
+bool Type::ResolveCompilerType(ResolveState compiler_type_resolve_state) {
   // TODO: This needs to consider the correct type system to use.
   Type *encoding_type = nullptr;
   if (!m_compiler_type.IsValid()) {
@@ -506,7 +510,7 @@ bool Type::ResolveClangType(ResolveState compiler_type_resolve_state) {
       case eEncodingIsTypedefUID:
         m_compiler_type = encoding_type->GetForwardCompilerType().CreateTypedef(
             m_name.AsCString("__lldb_invalid_typedef_name"),
-            GetSymbolFile()->GetDeclContextContainingUID(GetID()));
+            GetSymbolFile()->GetDeclContextContainingUID(GetID()), m_payload);
         m_name.Clear();
         break;
 
@@ -564,7 +568,7 @@ bool Type::ResolveClangType(ResolveState compiler_type_resolve_state) {
         case eEncodingIsTypedefUID:
           m_compiler_type = void_compiler_type.CreateTypedef(
               m_name.AsCString("__lldb_invalid_typedef_name"),
-              GetSymbolFile()->GetDeclContextContainingUID(GetID()));
+              GetSymbolFile()->GetDeclContextContainingUID(GetID()), m_payload);
           break;
 
         case eEncodingIsPointerUID:
@@ -627,7 +631,7 @@ bool Type::ResolveClangType(ResolveState compiler_type_resolve_state) {
           break;
         }
       }
-      encoding_type->ResolveClangType(encoding_compiler_type_resolve_state);
+      encoding_type->ResolveCompilerType(encoding_compiler_type_resolve_state);
     }
   }
   return m_compiler_type.IsValid();
@@ -642,22 +646,22 @@ uint32_t Type::GetEncodingMask() {
 }
 
 CompilerType Type::GetFullCompilerType() {
-  ResolveClangType(ResolveState::Full);
+  ResolveCompilerType(ResolveState::Full);
   return m_compiler_type;
 }
 
 CompilerType Type::GetLayoutCompilerType() {
-  ResolveClangType(ResolveState::Layout);
+  ResolveCompilerType(ResolveState::Layout);
   return m_compiler_type;
 }
 
 CompilerType Type::GetForwardCompilerType() {
-  ResolveClangType(ResolveState::Forward);
+  ResolveCompilerType(ResolveState::Forward);
   return m_compiler_type;
 }
 
 ConstString Type::GetQualifiedName() {
-  return GetForwardCompilerType().GetConstTypeName();
+  return GetForwardCompilerType().GetTypeName();
 }
 
 bool Type::GetTypeScopeAndBasename(const llvm::StringRef& name,

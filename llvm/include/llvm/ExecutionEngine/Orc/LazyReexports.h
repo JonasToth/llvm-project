@@ -40,33 +40,45 @@ public:
   using NotifyResolvedFunction =
       unique_function<Error(JITTargetAddress ResolvedAddr)>;
 
+  LazyCallThroughManager(ExecutionSession &ES,
+                         JITTargetAddress ErrorHandlerAddr, TrampolinePool *TP);
+
   // Return a free call-through trampoline and bind it to look up and call
   // through to the given symbol.
   Expected<JITTargetAddress>
   getCallThroughTrampoline(JITDylib &SourceJD, SymbolStringPtr SymbolName,
                            NotifyResolvedFunction NotifyResolved);
 
+  void resolveTrampolineLandingAddress(
+      JITTargetAddress TrampolineAddr,
+      TrampolinePool::NotifyLandingResolvedFunction NotifyLandingResolved);
+
+  virtual ~LazyCallThroughManager() = default;
+
 protected:
-  LazyCallThroughManager(ExecutionSession &ES,
-                         JITTargetAddress ErrorHandlerAddr,
-                         std::unique_ptr<TrampolinePool> TP);
+  using NotifyLandingResolvedFunction =
+      TrampolinePool::NotifyLandingResolvedFunction;
 
-  JITTargetAddress callThroughToSymbol(JITTargetAddress TrampolineAddr);
+  struct ReexportsEntry {
+    JITDylib *SourceJD;
+    SymbolStringPtr SymbolName;
+  };
 
-  void setTrampolinePool(std::unique_ptr<TrampolinePool> TP) {
-    this->TP = std::move(TP);
-  }
+  JITTargetAddress reportCallThroughError(Error Err);
+  Expected<ReexportsEntry> findReexport(JITTargetAddress TrampolineAddr);
+  Error notifyResolved(JITTargetAddress TrampolineAddr,
+                       JITTargetAddress ResolvedAddr);
+  void setTrampolinePool(TrampolinePool &TP) { this->TP = &TP; }
 
 private:
-  using ReexportsMap =
-      std::map<JITTargetAddress, std::pair<JITDylib *, SymbolStringPtr>>;
+  using ReexportsMap = std::map<JITTargetAddress, ReexportsEntry>;
 
   using NotifiersMap = std::map<JITTargetAddress, NotifyResolvedFunction>;
 
   std::mutex LCTMMutex;
   ExecutionSession &ES;
   JITTargetAddress ErrorHandlerAddr;
-  std::unique_ptr<TrampolinePool> TP;
+  TrampolinePool *TP = nullptr;
   ReexportsMap Reexports;
   NotifiersMap Notifiers;
 };
@@ -74,22 +86,30 @@ private:
 /// A lazy call-through manager that builds trampolines in the current process.
 class LocalLazyCallThroughManager : public LazyCallThroughManager {
 private:
+  using NotifyTargetResolved = unique_function<void(JITTargetAddress)>;
+
   LocalLazyCallThroughManager(ExecutionSession &ES,
                               JITTargetAddress ErrorHandlerAddr)
       : LazyCallThroughManager(ES, ErrorHandlerAddr, nullptr) {}
 
   template <typename ORCABI> Error init() {
     auto TP = LocalTrampolinePool<ORCABI>::Create(
-        [this](JITTargetAddress TrampolineAddr) {
-          return callThroughToSymbol(TrampolineAddr);
+        [this](JITTargetAddress TrampolineAddr,
+               TrampolinePool::NotifyLandingResolvedFunction
+                   NotifyLandingResolved) {
+          resolveTrampolineLandingAddress(TrampolineAddr,
+                                          std::move(NotifyLandingResolved));
         });
 
     if (!TP)
       return TP.takeError();
 
-    setTrampolinePool(std::move(*TP));
+    this->TP = std::move(*TP);
+    setTrampolinePool(*this->TP);
     return Error::success();
   }
+
+  std::unique_ptr<TrampolinePool> TP;
 
 public:
   /// Create a LocalLazyCallThroughManager using the given ABI. See
@@ -129,7 +149,7 @@ public:
   StringRef getName() const override;
 
 private:
-  void materialize(MaterializationResponsibility R) override;
+  void materialize(std::unique_ptr<MaterializationResponsibility> R) override;
   void discard(const JITDylib &JD, const SymbolStringPtr &Name) override;
   static SymbolFlagsMap extractFlags(const SymbolAliasMap &Aliases);
 

@@ -16,18 +16,20 @@
 #include "llvm/LTO/LTOBackend.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
+#include "llvm/Analysis/ModuleSummaryAnalysis.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
+#include "llvm/IR/LLVMRemarkStreamer.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/PassManager.h"
-#include "llvm/IR/RemarkStreamer.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/LTO/LTO.h"
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/Object/ModuleSymbolTable.h"
 #include "llvm/Passes/PassBuilder.h"
+#include "llvm/Passes/PassPlugin.h"
 #include "llvm/Passes/StandardInstrumentations.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
@@ -48,6 +50,25 @@
 using namespace llvm;
 using namespace lto;
 
+#define DEBUG_TYPE "lto-backend"
+
+enum class LTOBitcodeEmbedding {
+  DoNotEmbed = 0,
+  EmbedOptimized = 1,
+  EmbedPostMergePreOptimized = 2
+};
+
+static cl::opt<LTOBitcodeEmbedding> EmbedBitcode(
+    "lto-embed-bitcode", cl::init(LTOBitcodeEmbedding::DoNotEmbed),
+    cl::values(clEnumValN(LTOBitcodeEmbedding::DoNotEmbed, "none",
+                          "Do not embed"),
+               clEnumValN(LTOBitcodeEmbedding::EmbedOptimized, "optimized",
+                          "Embed after all optimization passes"),
+               clEnumValN(LTOBitcodeEmbedding::EmbedPostMergePreOptimized,
+                          "post-merge-pre-opt",
+                          "Embed post merge, but before optimizations")),
+    cl::desc("Embed LLVM bitcode in object files produced by LTO"));
+
 LLVM_ATTRIBUTE_NORETURN static void reportOpenError(StringRef Path, Twine Msg) {
   errs() << "failed to open " << Path << ": " << Msg << '\n';
   errs().flush();
@@ -61,8 +82,10 @@ Error Config::addSaveTemps(std::string OutputFileName,
   std::error_code EC;
   ResolutionFile = std::make_unique<raw_fd_ostream>(
       OutputFileName + "resolution.txt", EC, sys::fs::OpenFlags::OF_Text);
-  if (EC)
+  if (EC) {
+    ResolutionFile.reset();
     return errorCodeToError(EC);
+  }
 
   auto setHook = [&](std::string PathSuffix, ModuleHookFn &Hook) {
     // Keep track of the hook provided by the linker, which also needs to run.
@@ -125,6 +148,29 @@ Error Config::addSaveTemps(std::string OutputFileName,
   return Error::success();
 }
 
+#define HANDLE_EXTENSION(Ext)                                                  \
+  llvm::PassPluginLibraryInfo get##Ext##PluginInfo();
+#include "llvm/Support/Extension.def"
+
+static void RegisterPassPlugins(ArrayRef<std::string> PassPlugins,
+                                PassBuilder &PB) {
+#define HANDLE_EXTENSION(Ext)                                                  \
+  get##Ext##PluginInfo().RegisterPassBuilderCallbacks(PB);
+#include "llvm/Support/Extension.def"
+
+  // Load requested pass plugins and let them register pass builder callbacks
+  for (auto &PluginFN : PassPlugins) {
+    auto PassPlugin = PassPlugin::Load(PluginFN);
+    if (!PassPlugin) {
+      errs() << "Failed to load passes from '" << PluginFN
+             << "'. Request ignored.\n";
+      continue;
+    }
+
+    PassPlugin->registerPassBuilderCallbacks(PB);
+  }
+}
+
 namespace {
 
 std::unique_ptr<TargetMachine>
@@ -170,7 +216,7 @@ static void runNewPMPasses(const Config &Conf, Module &Mod, TargetMachine *TM,
   }
 
   PassInstrumentationCallbacks PIC;
-  StandardInstrumentations SI;
+  StandardInstrumentations SI(Conf.DebugPassManager);
   SI.registerCallbacks(PIC);
   PassBuilder PB(TM, Conf.PTO, PGOOpt, &PIC);
   AAManager AA;
@@ -178,6 +224,8 @@ static void runNewPMPasses(const Config &Conf, Module &Mod, TargetMachine *TM,
   // Parse a custom AA pipeline if asked to.
   if (auto Err = PB.parseAAPipeline(AA, "default"))
     report_fatal_error("Error parsing default AA pipeline");
+
+  RegisterPassPlugins(Conf.PassPlugins, PB);
 
   LoopAnalysisManager LAM(Conf.DebugPassManager);
   FunctionAnalysisManager FAM(Conf.DebugPassManager);
@@ -226,8 +274,8 @@ static void runNewPMPasses(const Config &Conf, Module &Mod, TargetMachine *TM,
   // FIXME (davide): verify the output.
 }
 
-static void runNewPMCustomPasses(Module &Mod, TargetMachine *TM,
-                                 std::string PipelineDesc,
+static void runNewPMCustomPasses(const Config &Conf, Module &Mod,
+                                 TargetMachine *TM, std::string PipelineDesc,
                                  std::string AAPipelineDesc,
                                  bool DisableVerify) {
   PassBuilder PB(TM);
@@ -238,6 +286,8 @@ static void runNewPMCustomPasses(Module &Mod, TargetMachine *TM,
     if (auto Err = PB.parseAAPipeline(AA, AAPipelineDesc))
       report_fatal_error("unable to parse AA pipeline description '" +
                          AAPipelineDesc + "': " + toString(std::move(Err)));
+
+  RegisterPassPlugins(Conf.PassPlugins, PB);
 
   LoopAnalysisManager LAM;
   FunctionAnalysisManager FAM;
@@ -302,10 +352,28 @@ static void runOldPMPasses(const Config &Conf, Module &Mod, TargetMachine *TM,
 
 bool opt(const Config &Conf, TargetMachine *TM, unsigned Task, Module &Mod,
          bool IsThinLTO, ModuleSummaryIndex *ExportSummary,
-         const ModuleSummaryIndex *ImportSummary) {
+         const ModuleSummaryIndex *ImportSummary,
+         const std::vector<uint8_t> *CmdArgs = nullptr) {
+  if (EmbedBitcode == LTOBitcodeEmbedding::EmbedPostMergePreOptimized) {
+    // FIXME: the motivation for capturing post-merge bitcode and command line
+    // is replicating the compilation environment from bitcode, without needing
+    // to understand the dependencies (the functions to be imported). This
+    // assumes a clang - based invocation, case in which we have the command
+    // line.
+    // It's not very clear how the above motivation would map in the
+    // linker-based case, so we currently don't plumb the command line args in
+    // that case.
+    if (CmdArgs == nullptr)
+      LLVM_DEBUG(
+          dbgs() << "Post-(Thin)LTO merge bitcode embedding was requested, but "
+                    "command line arguments are not available");
+    llvm::EmbedBitcodeInModule(Mod, llvm::MemoryBufferRef(),
+                               /*EmbedBitcode*/ true,
+                               /*EmbedMarker*/ false, CmdArgs);
+  }
   // FIXME: Plumb the combined index into the new pass manager.
   if (!Conf.OptPipeline.empty())
-    runNewPMCustomPasses(Mod, TM, Conf.OptPipeline, Conf.AAPipeline,
+    runNewPMCustomPasses(Conf, Mod, TM, Conf.OptPipeline, Conf.AAPipeline,
                          Conf.DisableVerify);
   else if (Conf.UseNewPM)
     runNewPMPasses(Conf, Mod, TM, Conf.OptLevel, IsThinLTO, ExportSummary,
@@ -315,29 +383,16 @@ bool opt(const Config &Conf, TargetMachine *TM, unsigned Task, Module &Mod,
   return !Conf.PostOptModuleHook || Conf.PostOptModuleHook(Task, Mod);
 }
 
-static cl::opt<bool> EmbedBitcode(
-    "lto-embed-bitcode", cl::init(false),
-    cl::desc("Embed LLVM bitcode in object files produced by LTO"));
-
-static void EmitBitcodeSection(Module &M, const Config &Conf) {
-  if (!EmbedBitcode)
-    return;
-  SmallVector<char, 0> Buffer;
-  raw_svector_ostream OS(Buffer);
-  WriteBitcodeToFile(M, OS);
-
-  std::unique_ptr<MemoryBuffer> Buf(
-      new SmallVectorMemoryBuffer(std::move(Buffer)));
-  llvm::EmbedBitcodeInModule(M, Buf->getMemBufferRef(), /*EmbedBitcode*/ true,
-                             /*EmbedMarker*/ false, /*CmdArgs*/ nullptr);
-}
-
 void codegen(const Config &Conf, TargetMachine *TM, AddStreamFn AddStream,
-             unsigned Task, Module &Mod) {
+             unsigned Task, Module &Mod,
+             const ModuleSummaryIndex &CombinedIndex) {
   if (Conf.PreCodeGenModuleHook && !Conf.PreCodeGenModuleHook(Task, Mod))
     return;
 
-  EmitBitcodeSection(Mod, Conf);
+  if (EmbedBitcode == LTOBitcodeEmbedding::EmbedOptimized)
+    llvm::EmbedBitcodeInModule(Mod, llvm::MemoryBufferRef(),
+                               /*EmbedBitcode*/ true,
+                               /*EmbedMarker*/ false, /*CmdArgs*/ nullptr);
 
   std::unique_ptr<ToolOutputFile> DwoOut;
   SmallString<1024> DwoFile(Conf.SplitDwarfOutput);
@@ -362,6 +417,8 @@ void codegen(const Config &Conf, TargetMachine *TM, AddStreamFn AddStream,
 
   auto Stream = AddStream(Task);
   legacy::PassManager CodeGenPasses;
+  CodeGenPasses.add(
+      createImmutableModuleSummaryIndexWrapperPass(&CombinedIndex));
   if (TM->addPassesToEmitFile(CodeGenPasses, *Stream->OS,
                               DwoOut ? &DwoOut->os() : nullptr,
                               Conf.CGFileType))
@@ -374,8 +431,10 @@ void codegen(const Config &Conf, TargetMachine *TM, AddStreamFn AddStream,
 
 void splitCodeGen(const Config &C, TargetMachine *TM, AddStreamFn AddStream,
                   unsigned ParallelCodeGenParallelismLevel,
-                  std::unique_ptr<Module> Mod) {
-  ThreadPool CodegenThreadPool(ParallelCodeGenParallelismLevel);
+                  std::unique_ptr<Module> Mod,
+                  const ModuleSummaryIndex &CombinedIndex) {
+  ThreadPool CodegenThreadPool(
+      heavyweight_hardware_concurrency(ParallelCodeGenParallelismLevel));
   unsigned ThreadCount = 0;
   const Target *T = &TM->getTarget();
 
@@ -406,7 +465,8 @@ void splitCodeGen(const Config &C, TargetMachine *TM, AddStreamFn AddStream,
               std::unique_ptr<TargetMachine> TM =
                   createTargetMachine(C, T, *MPartInCtx);
 
-              codegen(C, TM.get(), AddStream, ThreadId, *MPartInCtx);
+              codegen(C, TM.get(), AddStream, ThreadId, *MPartInCtx,
+                      CombinedIndex);
             },
             // Pass BC using std::move to ensure that it get moved rather than
             // copied into the thread's context.
@@ -462,10 +522,10 @@ Error lto::backend(const Config &C, AddStreamFn AddStream,
   }
 
   if (ParallelCodeGenParallelismLevel == 1) {
-    codegen(C, TM.get(), AddStream, 0, *Mod);
+    codegen(C, TM.get(), AddStream, 0, *Mod, CombinedIndex);
   } else {
     splitCodeGen(C, TM.get(), AddStream, ParallelCodeGenParallelismLevel,
-                 std::move(Mod));
+                 std::move(Mod), CombinedIndex);
   }
   return Error::success();
 }
@@ -495,7 +555,8 @@ Error lto::thinBackend(const Config &Conf, unsigned Task, AddStreamFn AddStream,
                        Module &Mod, const ModuleSummaryIndex &CombinedIndex,
                        const FunctionImporter::ImportMapTy &ImportList,
                        const GVSummaryMapTy &DefinedGlobals,
-                       MapVector<StringRef, BitcodeModule> &ModuleMap) {
+                       MapVector<StringRef, BitcodeModule> &ModuleMap,
+                       const std::vector<uint8_t> *CmdArgs) {
   Expected<const Target *> TOrErr = initAndLookupTarget(Conf, Mod);
   if (!TOrErr)
     return TOrErr.takeError();
@@ -503,22 +564,32 @@ Error lto::thinBackend(const Config &Conf, unsigned Task, AddStreamFn AddStream,
   std::unique_ptr<TargetMachine> TM = createTargetMachine(Conf, *TOrErr, Mod);
 
   // Setup optimization remarks.
-  auto DiagFileOrErr = lto::setupOptimizationRemarks(
+  auto DiagFileOrErr = lto::setupLLVMOptimizationRemarks(
       Mod.getContext(), Conf.RemarksFilename, Conf.RemarksPasses,
       Conf.RemarksFormat, Conf.RemarksWithHotness, Task);
   if (!DiagFileOrErr)
     return DiagFileOrErr.takeError();
   auto DiagnosticOutputFile = std::move(*DiagFileOrErr);
 
+  // Set the partial sample profile ratio in the profile summary module flag of
+  // the module, if applicable.
+  Mod.setPartialSampleProfileRatio(CombinedIndex);
+
   if (Conf.CodeGenOnly) {
-    codegen(Conf, TM.get(), AddStream, Task, Mod);
+    codegen(Conf, TM.get(), AddStream, Task, Mod, CombinedIndex);
     return finalizeOptimizationRemarks(std::move(DiagnosticOutputFile));
   }
 
   if (Conf.PreOptModuleHook && !Conf.PreOptModuleHook(Task, Mod))
     return finalizeOptimizationRemarks(std::move(DiagnosticOutputFile));
 
-  renameModuleForThinLTO(Mod, CombinedIndex);
+  // When linking an ELF shared object, dso_local should be dropped. We
+  // conservatively do this for -fpic.
+  bool ClearDSOLocalOnDeclarations =
+      TM->getTargetTriple().isOSBinFormatELF() &&
+      TM->getRelocationModel() != Reloc::Static &&
+      Mod.getPIELevel() == PIELevel::Default;
+  renameModuleForThinLTO(Mod, CombinedIndex, ClearDSOLocalOnDeclarations);
 
   dropDeadSymbols(Mod, DefinedGlobals, CombinedIndex);
 
@@ -544,7 +615,8 @@ Error lto::thinBackend(const Config &Conf, unsigned Task, AddStreamFn AddStream,
                                    /*IsImporting*/ true);
   };
 
-  FunctionImporter Importer(CombinedIndex, ModuleLoader);
+  FunctionImporter Importer(CombinedIndex, ModuleLoader,
+                            ClearDSOLocalOnDeclarations);
   if (Error Err = Importer.importFunctions(Mod, ImportList).takeError())
     return Err;
 
@@ -552,9 +624,10 @@ Error lto::thinBackend(const Config &Conf, unsigned Task, AddStreamFn AddStream,
     return finalizeOptimizationRemarks(std::move(DiagnosticOutputFile));
 
   if (!opt(Conf, TM.get(), Task, Mod, /*IsThinLTO=*/true,
-           /*ExportSummary=*/nullptr, /*ImportSummary=*/&CombinedIndex))
+           /*ExportSummary=*/nullptr, /*ImportSummary=*/&CombinedIndex,
+           CmdArgs))
     return finalizeOptimizationRemarks(std::move(DiagnosticOutputFile));
 
-  codegen(Conf, TM.get(), AddStream, Task, Mod);
+  codegen(Conf, TM.get(), AddStream, Task, Mod, CombinedIndex);
   return finalizeOptimizationRemarks(std::move(DiagnosticOutputFile));
 }

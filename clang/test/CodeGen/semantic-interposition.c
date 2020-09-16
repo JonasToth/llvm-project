@@ -1,14 +1,9 @@
-// Semantic Interposition is active if
-//  -fsemantic-interposition is set,
-// - pic-level > 0
-// - pic-is-pie is not set
+// RUN: %clang_cc1 -emit-llvm -fsemantic-interposition %s -o - | FileCheck --check-prefix=INTERPOSITION %s
+// RUN: %clang_cc1 -emit-llvm %s -o - | FileCheck --check-prefix=NO %s
+/// With explicit -fno-semantic-interposition, add a module flag to inform the
+/// backend that dso_local can be inferred.
+// RUN: %clang_cc1 -emit-llvm -fno-semantic-interposition %s -o - | FileCheck --check-prefix=EXPLICIT_NO %s
 
-// RUN: %clang_cc1 -emit-llvm -fsemantic-interposition -pic-level 0 %s -o - | FileCheck %s -check-prefix=CHECK-NO-INTERPOSITION
-// RUN: %clang_cc1 -emit-llvm -fsemantic-interposition -pic-level 1 %s -o - | FileCheck %s -check-prefix=CHECK-INTERPOSITION
-// RUN: %clang_cc1 -emit-llvm -fsemantic-interposition -pic-level 2 %s -o - | FileCheck %s -check-prefix=CHECK-INTERPOSITION
-// RUN: %clang_cc1 -emit-llvm -fsemantic-interposition -pic-level 0 %s -o - | FileCheck %s -check-prefix=CHECK-NO-INTERPOSITION
-// RUN: %clang_cc1 -emit-llvm -fsemantic-interposition -pic-level 1 -pic-is-pie %s -o - | FileCheck %s -check-prefix=CHECK-NO-INTERPOSITION
-// RUN: %clang_cc1 -emit-llvm -fsemantic-interposition -pic-level 2 -pic-is-pie %s -o - | FileCheck %s -check-prefix=CHECK-NO-INTERPOSITION
-
-// CHECK-NO-INTERPOSITION-NOT: "SemanticInterposition"
-// CHECK-INTERPOSITION: !{{[0-9]+}} = !{i32 1, !"SemanticInterposition", i32 1}
+// INTERPOSITION: !{{[0-9]+}} = !{i32 1, !"SemanticInterposition", i32 1}
+// NO-NOT: "SemanticInterposition"
+// EXPLICIT_NO: !{{[0-9]+}} = !{i32 1, !"SemanticInterposition", i32 0}

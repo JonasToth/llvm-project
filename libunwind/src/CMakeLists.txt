@@ -24,12 +24,10 @@ set(LIBUNWIND_ASM_SOURCES
     UnwindRegistersRestore.S
     UnwindRegistersSave.S
     )
-if (MINGW)
-  # CMake doesn't build assembly sources for windows/gnu targets properly
-  # (up to current CMake, 3.16), so treat them as C files.
-  set_source_files_properties(${LIBUNWIND_ASM_SOURCES}
-                              PROPERTIES
-                                LANGUAGE C)
+
+# See add_asm_sources() in compiler-rt for explanation of this workaround.
+if((APPLE AND CMAKE_VERSION VERSION_LESS 3.19) OR (MINGW AND CMAKE_VERSION VERSION_LESS 3.17))
+  set_source_files_properties(${LIBUNWIND_ASM_SOURCES} PROPERTIES LANGUAGE C)
 endif()
 
 set(LIBUNWIND_HEADERS
@@ -40,9 +38,12 @@ set(LIBUNWIND_HEADERS
     dwarf2.h
     DwarfInstructions.hpp
     DwarfParser.hpp
+    EHHeaderParser.hpp
+    FrameHeaderCache.hpp
     libunwind_ext.h
     Registers.hpp
     RWMutex.hpp
+    Unwind-EHABI.h
     UnwindCursor.hpp
     ../include/libunwind.h
     ../include/unwind.h

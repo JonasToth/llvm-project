@@ -7,16 +7,17 @@
 //===----------------------------------------------------------------------===//
 
 #include "Writer.h"
+#include "CallGraphSort.h"
 #include "Config.h"
 #include "DLL.h"
 #include "InputFiles.h"
+#include "LLDMapFile.h"
 #include "MapFile.h"
 #include "PDB.h"
 #include "SymbolTable.h"
 #include "Symbols.h"
 #include "lld/Common/ErrorHandler.h"
 #include "lld/Common/Memory.h"
-#include "lld/Common/Threads.h"
 #include "lld/Common/Timer.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
@@ -41,9 +42,8 @@ using namespace llvm::COFF;
 using namespace llvm::object;
 using namespace llvm::support;
 using namespace llvm::support::endian;
-
-namespace lld {
-namespace coff {
+using namespace lld;
+using namespace lld::coff;
 
 /* To re-generate DOSProgram:
 $ cat > /tmp/DOSProgram.asm
@@ -92,7 +92,8 @@ namespace {
 
 class DebugDirectoryChunk : public NonSectionChunk {
 public:
-  DebugDirectoryChunk(const std::vector<Chunk *> &r, bool writeRepro)
+  DebugDirectoryChunk(const std::vector<std::pair<COFF::DebugType, Chunk *>> &r,
+                      bool writeRepro)
       : records(r), writeRepro(writeRepro) {}
 
   size_t getSize() const override {
@@ -102,11 +103,11 @@ public:
   void writeTo(uint8_t *b) const override {
     auto *d = reinterpret_cast<debug_directory *>(b);
 
-    for (const Chunk *record : records) {
-      OutputSection *os = record->getOutputSection();
-      uint64_t offs = os->getFileOff() + (record->getRVA() - os->getRVA());
-      fillEntry(d, COFF::IMAGE_DEBUG_TYPE_CODEVIEW, record->getSize(),
-                record->getRVA(), offs);
+    for (const std::pair<COFF::DebugType, Chunk *>& record : records) {
+      Chunk *c = record.second;
+      OutputSection *os = c->getOutputSection();
+      uint64_t offs = os->getFileOff() + (c->getRVA() - os->getRVA());
+      fillEntry(d, record.first, c->getSize(), c->getRVA(), offs);
       ++d;
     }
 
@@ -141,7 +142,7 @@ private:
   }
 
   mutable std::vector<support::ulittle32_t *> timeDateStamps;
-  const std::vector<Chunk *> &records;
+  const std::vector<std::pair<COFF::DebugType, Chunk *>> &records;
   bool writeRepro;
 };
 
@@ -164,6 +165,17 @@ public:
   }
 
   mutable codeview::DebugInfo *buildId = nullptr;
+};
+
+class ExtendedDllCharacteristicsChunk : public NonSectionChunk {
+public:
+  ExtendedDllCharacteristicsChunk(uint32_t c) : characteristics(c) {}
+
+  size_t getSize() const override { return 4; }
+
+  void writeTo(uint8_t *buf) const override { write32le(buf, characteristics); }
+
+  uint32_t characteristics = 0;
 };
 
 // PartialSection represents a group of chunks that contribute to an
@@ -218,6 +230,7 @@ private:
   void setSectionPermissions();
   void writeSections();
   void writeBuildId();
+  void sortSections();
   void sortExceptionTable();
   void sortCRTSectionChunks(std::vector<Chunk *> &chunks);
   void addSyntheticIdata();
@@ -251,7 +264,7 @@ private:
   bool setNoSEHCharacteristic = false;
 
   DebugDirectoryChunk *debugDirectory = nullptr;
-  std::vector<Chunk *> debugRecords;
+  std::vector<std::pair<COFF::DebugType, Chunk *>> debugRecords;
   CVDebugRecordChunk *buildId = nullptr;
   ArrayRef<uint8_t> sectionTable;
 
@@ -290,7 +303,7 @@ private:
 static Timer codeLayoutTimer("Code Layout", Timer::root());
 static Timer diskCommitTimer("Commit Output File", Timer::root());
 
-void writeResult() { Writer().run(); }
+void lld::coff::writeResult() { Writer().run(); }
 
 void OutputSection::addChunk(Chunk *c) {
   chunks.push_back(c);
@@ -588,6 +601,9 @@ void Writer::finalizeAddresses() {
 void Writer::run() {
   ScopedTimer t1(codeLayoutTimer);
 
+  // First, clear the output sections from previous runs
+  outputSections.clear();
+
   createImportTables();
   createSections();
   createMiscChunks();
@@ -622,6 +638,7 @@ void Writer::run() {
   }
   writeBuildId();
 
+  writeLLDMapFile(outputSections);
   writeMapFile(outputSections);
 
   if (errorCount())
@@ -786,6 +803,19 @@ static bool shouldStripSectionSuffix(SectionChunk *sc, StringRef name) {
          name.startswith(".xdata$") || name.startswith(".eh_frame$");
 }
 
+void Writer::sortSections() {
+  if (!config->callGraphProfile.empty()) {
+    DenseMap<const SectionChunk *, int> order = computeCallGraphProfileOrder();
+    for (auto it : order) {
+      if (DefinedRegular *sym = it.first->sym)
+        config->order[sym->getName()] = it.second;
+    }
+  }
+  if (!config->order.empty())
+    for (auto it : partialSections)
+      sortBySectionOrder(it.second->chunks);
+}
+
 // Create output section objects and add them to OutputSections.
 void Writer::createSections() {
   // First, create the builtin sections.
@@ -849,10 +879,7 @@ void Writer::createSections() {
   if (hasIdata)
     addSyntheticIdata();
 
-  // Process an /order option.
-  if (!config->order.empty())
-    for (auto it : partialSections)
-      sortBySectionOrder(it.second->chunks);
+  sortSections();
 
   if (hasIdata)
     locateImportTables();
@@ -921,8 +948,9 @@ void Writer::createMiscChunks() {
 
   // Create Debug Information Chunks
   OutputSection *debugInfoSec = config->mingw ? buildidSec : rdataSec;
-  if (config->debug || config->repro) {
+  if (config->debug || config->repro || config->cetCompat) {
     debugDirectory = make<DebugDirectoryChunk>(debugRecords, config->repro);
+    debugDirectory->setAlignment(4);
     debugInfoSec->addChunk(debugDirectory);
   }
 
@@ -932,10 +960,20 @@ void Writer::createMiscChunks() {
     // allowing a debugger to match a PDB and an executable.  So we need it even
     // if we're ultimately not going to write CodeView data to the PDB.
     buildId = make<CVDebugRecordChunk>();
-    debugRecords.push_back(buildId);
+    debugRecords.push_back({COFF::IMAGE_DEBUG_TYPE_CODEVIEW, buildId});
+  }
 
-    for (Chunk *c : debugRecords)
-      debugInfoSec->addChunk(c);
+  if (config->cetCompat) {
+    ExtendedDllCharacteristicsChunk *extendedDllChars =
+        make<ExtendedDllCharacteristicsChunk>(
+            IMAGE_DLL_CHARACTERISTICS_EX_CET_COMPAT);
+    debugRecords.push_back(
+        {COFF::IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS, extendedDllChars});
+  }
+
+  if (debugRecords.size() > 0) {
+    for (std::pair<COFF::DebugType, Chunk *> r : debugRecords)
+      debugInfoSec->addChunk(r.second);
   }
 
   // Create SEH table. x86-only.
@@ -946,11 +984,11 @@ void Writer::createMiscChunks() {
   if (config->guardCF != GuardCFLevel::Off)
     createGuardCFTables();
 
-  if (config->mingw) {
+  if (config->autoImport)
     createRuntimePseudoRelocs();
 
+  if (config->mingw)
     insertCtorDtorSymbols();
-  }
 }
 
 // Create .idata section for the DLL-imported symbol table.
@@ -1370,7 +1408,7 @@ template <typename PEHeaderTy> void Writer::writeHeader() {
     pe->DLLCharacteristics |= IMAGE_DLL_CHARACTERISTICS_GUARD_CF;
   if (config->integrityCheck)
     pe->DLLCharacteristics |= IMAGE_DLL_CHARACTERISTICS_FORCE_INTEGRITY;
-  if (setNoSEHCharacteristic)
+  if (setNoSEHCharacteristic || config->noSEH)
     pe->DLLCharacteristics |= IMAGE_DLL_CHARACTERISTICS_NO_SEH;
   if (config->terminalServerAware)
     pe->DLLCharacteristics |= IMAGE_DLL_CHARACTERISTICS_TERMINAL_SERVER_AWARE;
@@ -1699,6 +1737,15 @@ void Writer::createRuntimePseudoRelocs() {
     sc->getRuntimePseudoRelocs(rels);
   }
 
+  if (!config->pseudoRelocs) {
+    // Not writing any pseudo relocs; if some were needed, error out and
+    // indicate what required them.
+    for (const RuntimePseudoReloc &rpr : rels)
+      error("automatic dllimport of " + rpr.sym->getName() + " in " +
+            toString(rpr.target->file) + " requires pseudo relocations");
+    return;
+  }
+
   if (!rels.empty())
     log("Writing " + Twine(rels.size()) + " runtime pseudo relocations");
   PseudoRelocTableChunk *table = make<PseudoRelocTableChunk>(rels);
@@ -1832,6 +1879,10 @@ void Writer::sortExceptionTable() {
   uint8_t *end = bufAddr(lastPdata) + lastPdata->getSize();
   if (config->machine == AMD64) {
     struct Entry { ulittle32_t begin, end, unwind; };
+    if ((end - begin) % sizeof(Entry) != 0) {
+      fatal("unexpected .pdata size: " + Twine(end - begin) +
+            " is not a multiple of " + Twine(sizeof(Entry)));
+    }
     parallelSort(
         MutableArrayRef<Entry>((Entry *)begin, (Entry *)end),
         [](const Entry &a, const Entry &b) { return a.begin < b.begin; });
@@ -1839,6 +1890,10 @@ void Writer::sortExceptionTable() {
   }
   if (config->machine == ARMNT || config->machine == ARM64) {
     struct Entry { ulittle32_t begin, unwind; };
+    if ((end - begin) % sizeof(Entry) != 0) {
+      fatal("unexpected .pdata size: " + Twine(end - begin) +
+            " is not a multiple of " + Twine(sizeof(Entry)));
+    }
     parallelSort(
         MutableArrayRef<Entry>((Entry *)begin, (Entry *)end),
         [](const Entry &a, const Entry &b) { return a.begin < b.begin; });
@@ -1950,6 +2005,3 @@ PartialSection *Writer::findPartialSection(StringRef name, uint32_t outChars) {
     return it->second;
   return nullptr;
 }
-
-} // namespace coff
-} // namespace lld

@@ -7,7 +7,7 @@
 //===----------------------------------------------------------------------===//
 // Misc utils implementation using Fuchsia/Zircon APIs.
 //===----------------------------------------------------------------------===//
-#include "FuzzerDefs.h"
+#include "FuzzerPlatform.h"
 
 #if LIBFUZZER_FUCHSIA
 
@@ -354,7 +354,7 @@ void SetSignalHandler(const FuzzingOptions &Options) {
   Printf("%s", Buf);
 
   // Set up alarm handler if needed.
-  if (Options.UnitTimeoutSec > 0) {
+  if (Options.HandleAlrm && Options.UnitTimeoutSec > 0) {
     std::thread T(AlarmHandler, Options.UnitTimeoutSec / 2 + 1);
     T.detach();
   }
@@ -531,6 +531,16 @@ int ExecuteCommand(const Command &Cmd) {
   }
 
   return Info.return_code;
+}
+
+bool ExecuteCommand(const Command &BaseCmd, std::string *CmdOutput) {
+  auto LogFilePath = TempPath("SimPopenOut", ".txt");
+  Command Cmd(BaseCmd);
+  Cmd.setOutputFile(LogFilePath);
+  int Ret = ExecuteCommand(Cmd);
+  *CmdOutput = FileToString(LogFilePath);
+  RemoveFile(LogFilePath);
+  return Ret == 0;
 }
 
 const void *SearchMemory(const void *Data, size_t DataLen, const void *Patt,

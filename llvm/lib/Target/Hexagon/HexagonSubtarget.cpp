@@ -10,10 +10,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "HexagonSubtarget.h"
 #include "Hexagon.h"
 #include "HexagonInstrInfo.h"
 #include "HexagonRegisterInfo.h"
-#include "HexagonSubtarget.h"
 #include "MCTargetDesc/HexagonMCTargetDesc.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
@@ -26,6 +26,7 @@
 #include "llvm/CodeGen/ScheduleDAGInstrs.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Target/TargetMachine.h"
 #include <algorithm>
 #include <cassert>
 #include <map>
@@ -37,7 +38,6 @@ using namespace llvm;
 #define GET_SUBTARGETINFO_CTOR
 #define GET_SUBTARGETINFO_TARGET_DESC
 #include "HexagonGenSubtargetInfo.inc"
-
 
 static cl::opt<bool> EnableBSBSched("enable-bsb-sched",
   cl::Hidden, cl::ZeroOrMore, cl::init(true));
@@ -77,7 +77,8 @@ static cl::opt<bool> EnableCheckBankConflict("hexagon-check-bank-conflict",
 
 HexagonSubtarget::HexagonSubtarget(const Triple &TT, StringRef CPU,
                                    StringRef FS, const TargetMachine &TM)
-    : HexagonGenSubtargetInfo(TT, CPU, FS), OptLevel(TM.getOptLevel()),
+    : HexagonGenSubtargetInfo(TT, CPU, /*TuneCPU*/ CPU, FS),
+      OptLevel(TM.getOptLevel()),
       CPUString(std::string(Hexagon_MC::selectHexagonCPU(CPU))),
       TargetTriple(TT), InstrInfo(initializeSubtargetDependencies(CPU, FS)),
       RegInfo(getHwMode()), TLInfo(TM, *this),
@@ -104,7 +105,7 @@ HexagonSubtarget::initializeSubtargetDependencies(StringRef CPU, StringRef FS) {
 
   UseBSBScheduling = hasV60Ops() && EnableBSBSched;
 
-  ParseSubtargetFeatures(CPUString, FS);
+  ParseSubtargetFeatures(CPUString, /*TuneCPU*/ CPUString, FS);
 
   if (OverrideLongCalls.getPosition())
     UseLongCalls = OverrideLongCalls;
@@ -315,13 +316,14 @@ bool HexagonSubtarget::useAA() const {
 
 /// Perform target specific adjustments to the latency of a schedule
 /// dependency.
-void HexagonSubtarget::adjustSchedDependency(SUnit *Src, SUnit *Dst,
+void HexagonSubtarget::adjustSchedDependency(SUnit *Src, int SrcOpIdx,
+                                             SUnit *Dst, int DstOpIdx,
                                              SDep &Dep) const {
-  MachineInstr *SrcInst = Src->getInstr();
-  MachineInstr *DstInst = Dst->getInstr();
   if (!Src->isInstr() || !Dst->isInstr())
     return;
 
+  MachineInstr *SrcInst = Src->getInstr();
+  MachineInstr *DstInst = Dst->getInstr();
   const HexagonInstrInfo *QII = getInstrInfo();
 
   // Instructions with .new operands have zero latency.
@@ -423,8 +425,17 @@ void HexagonSubtarget::restoreLatency(SUnit *Src, SUnit *Dst) const {
     int DefIdx = -1;
     for (unsigned OpNum = 0; OpNum < SrcI->getNumOperands(); OpNum++) {
       const MachineOperand &MO = SrcI->getOperand(OpNum);
-      if (MO.isReg() && MO.isDef() && MO.getReg() == DepR)
-        DefIdx = OpNum;
+      bool IsSameOrSubReg = false;
+      if (MO.isReg()) {
+        unsigned MOReg = MO.getReg();
+        if (Register::isVirtualRegister(DepR)) {
+          IsSameOrSubReg = (MOReg == DepR);
+        } else {
+          IsSameOrSubReg = getRegisterInfo()->isSubRegisterEq(DepR, MOReg);
+        }
+        if (MO.isDef() && IsSameOrSubReg)
+          DefIdx = OpNum;
+      }
     }
     assert(DefIdx >= 0 && "Def Reg not found in Src MI");
     MachineInstr *DstI = Dst->getInstr();

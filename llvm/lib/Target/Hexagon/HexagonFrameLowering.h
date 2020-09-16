@@ -11,6 +11,7 @@
 
 #include "Hexagon.h"
 #include "HexagonBlockRanges.h"
+#include "MCTargetDesc/HexagonMCTargetDesc.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -45,14 +46,17 @@ public:
   bool enableCalleeSaveSkip(const MachineFunction &MF) const override;
 
   bool spillCalleeSavedRegisters(MachineBasicBlock &MBB,
-      MachineBasicBlock::iterator MI, const std::vector<CalleeSavedInfo> &CSI,
-      const TargetRegisterInfo *TRI) const override {
+                                 MachineBasicBlock::iterator MI,
+                                 ArrayRef<CalleeSavedInfo> CSI,
+                                 const TargetRegisterInfo *TRI) const override {
     return true;
   }
 
-  bool restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
-      MachineBasicBlock::iterator MI, std::vector<CalleeSavedInfo> &CSI,
-      const TargetRegisterInfo *TRI) const override {
+  bool
+  restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
+                              MachineBasicBlock::iterator MI,
+                              MutableArrayRef<CalleeSavedInfo> CSI,
+                              const TargetRegisterInfo *TRI) const override {
     return true;
   }
 
@@ -80,7 +84,7 @@ public:
   }
 
   int getFrameIndexReference(const MachineFunction &MF, int FI,
-      unsigned &FrameReg) const override;
+                             Register &FrameReg) const override;
   bool hasFP(const MachineFunction &MF) const override;
 
   const SpillSlot *getCalleeSavedSpillSlots(unsigned &NumEntries)

@@ -9,15 +9,16 @@
 
 #include "AST.h"
 #include "FuzzyMatch.h"
-#include "Logger.h"
 #include "ParsedAST.h"
 #include "Quality.h"
 #include "SourceCode.h"
 #include "index/Index.h"
+#include "support/Logger.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/Index/IndexDataConsumer.h"
 #include "clang/Index/IndexSymbol.h"
 #include "clang/Index/IndexingAction.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/ScopedPrinter.h"
@@ -39,28 +40,28 @@ struct ScoredSymbolGreater {
 
 } // namespace
 
-llvm::Expected<Location> symbolToLocation(const Symbol &Sym,
-                                          llvm::StringRef HintPath) {
-  // Prefer the definition over e.g. a function declaration in a header
-  auto &CD = Sym.Definition ? Sym.Definition : Sym.CanonicalDeclaration;
-  auto Path = URI::resolve(CD.FileURI, HintPath);
-  if (!Path) {
-    return llvm::make_error<llvm::StringError>(
-        formatv("Could not resolve path for symbol '{0}': {1}",
-                Sym.Name, llvm::toString(Path.takeError())),
-        llvm::inconvertibleErrorCode());
-  }
+llvm::Expected<Location> indexToLSPLocation(const SymbolLocation &Loc,
+                                            llvm::StringRef TUPath) {
+  auto Path = URI::resolve(Loc.FileURI, TUPath);
+  if (!Path)
+    return error("Could not resolve path for file '{0}': {1}", Loc.FileURI,
+                 Path.takeError());
   Location L;
-  // Use HintPath as TUPath since there is no TU associated with this
-  // request.
-  L.uri = URIForFile::canonicalize(*Path, HintPath);
+  L.uri = URIForFile::canonicalize(*Path, TUPath);
   Position Start, End;
-  Start.line = CD.Start.line();
-  Start.character = CD.Start.column();
-  End.line = CD.End.line();
-  End.character = CD.End.column();
+  Start.line = Loc.Start.line();
+  Start.character = Loc.Start.column();
+  End.line = Loc.End.line();
+  End.character = Loc.End.column();
   L.range = {Start, End};
   return L;
+}
+
+llvm::Expected<Location> symbolToLocation(const Symbol &Sym,
+                                          llvm::StringRef TUPath) {
+  // Prefer the definition over e.g. a function declaration in a header
+  return indexToLSPLocation(
+      Sym.Definition ? Sym.Definition : Sym.CanonicalDeclaration, TUPath);
 }
 
 llvm::Expected<std::vector<SymbolInformation>>
@@ -132,17 +133,11 @@ llvm::Optional<DocumentSymbol> declToSym(ASTContext &Ctx, const NamedDecl &ND) {
   auto &SM = Ctx.getSourceManager();
 
   SourceLocation NameLoc = nameLocation(ND, SM);
-  // getFileLoc is a good choice for us, but we also need to make sure
-  // sourceLocToPosition won't switch files, so we call getSpellingLoc on top of
-  // that to make sure it does not switch files.
-  // FIXME: sourceLocToPosition should not switch files!
   SourceLocation BeginLoc = SM.getSpellingLoc(SM.getFileLoc(ND.getBeginLoc()));
   SourceLocation EndLoc = SM.getSpellingLoc(SM.getFileLoc(ND.getEndLoc()));
-  if (NameLoc.isInvalid() || BeginLoc.isInvalid() || EndLoc.isInvalid())
-    return llvm::None;
-
-  if (!SM.isWrittenInMainFile(NameLoc) || !SM.isWrittenInMainFile(BeginLoc) ||
-      !SM.isWrittenInMainFile(EndLoc))
+  const auto SymbolRange =
+      toHalfOpenFileRange(SM, Ctx.getLangOpts(), {BeginLoc, EndLoc});
+  if (!SymbolRange)
     return llvm::None;
 
   Position NameBegin = sourceLocToPosition(SM, NameLoc);
@@ -158,8 +153,8 @@ llvm::Optional<DocumentSymbol> declToSym(ASTContext &Ctx, const NamedDecl &ND) {
   SI.name = printName(Ctx, ND);
   SI.kind = SK;
   SI.deprecated = ND.isDeprecated();
-  SI.range =
-      Range{sourceLocToPosition(SM, BeginLoc), sourceLocToPosition(SM, EndLoc)};
+  SI.range = Range{sourceLocToPosition(SM, SymbolRange->getBegin()),
+                   sourceLocToPosition(SM, SymbolRange->getEnd())};
   SI.selectionRange = Range{NameBegin, NameEnd};
   if (!SI.range.contains(SI.selectionRange)) {
     // 'selectionRange' must be contained in 'range', so in cases where clang
@@ -190,7 +185,7 @@ public:
   }
 
 private:
-  enum class VisitKind { No, OnlyDecl, DeclAndChildren };
+  enum class VisitKind { No, OnlyDecl, OnlyChildren, DeclAndChildren };
 
   void traverseDecl(Decl *D, std::vector<DocumentSymbol> &Results) {
     if (auto *Templ = llvm::dyn_cast<TemplateDecl>(D)) {
@@ -198,18 +193,25 @@ private:
       if (auto *TD = Templ->getTemplatedDecl())
         D = TD;
     }
-    auto *ND = llvm::dyn_cast<NamedDecl>(D);
-    if (!ND)
-      return;
-    VisitKind Visit = shouldVisit(ND);
+
+    VisitKind Visit = shouldVisit(D);
     if (Visit == VisitKind::No)
       return;
-    llvm::Optional<DocumentSymbol> Sym = declToSym(AST.getASTContext(), *ND);
+
+    if (Visit == VisitKind::OnlyChildren)
+      return traverseChildren(D, Results);
+
+    auto *ND = llvm::cast<NamedDecl>(D);
+    auto Sym = declToSym(AST.getASTContext(), *ND);
     if (!Sym)
       return;
-    if (Visit == VisitKind::DeclAndChildren)
-      traverseChildren(D, Sym->children);
     Results.push_back(std::move(*Sym));
+
+    if (Visit == VisitKind::OnlyDecl)
+      return;
+
+    assert(Visit == VisitKind::DeclAndChildren && "Unexpected VisitKind");
+    traverseChildren(ND, Results.back().children);
   }
 
   void traverseChildren(Decl *D, std::vector<DocumentSymbol> &Results) {
@@ -220,8 +222,14 @@ private:
       traverseDecl(C, Results);
   }
 
-  VisitKind shouldVisit(NamedDecl *D) {
+  VisitKind shouldVisit(Decl *D) {
     if (D->isImplicit())
+      return VisitKind::No;
+
+    if (llvm::isa<LinkageSpecDecl>(D) || llvm::isa<ExportDecl>(D))
+      return VisitKind::OnlyChildren;
+
+    if (!llvm::isa<NamedDecl>(D))
       return VisitKind::No;
 
     if (auto Func = llvm::dyn_cast<FunctionDecl>(D)) {

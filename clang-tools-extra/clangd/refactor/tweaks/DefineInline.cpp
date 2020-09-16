@@ -8,11 +8,11 @@
 
 #include "AST.h"
 #include "FindTarget.h"
-#include "Logger.h"
 #include "Selection.h"
 #include "SourceCode.h"
 #include "XRefs.h"
 #include "refactor/Tweak.h"
+#include "support/Logger.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/ASTTypeTraits.h"
 #include "clang/AST/Decl.h"
@@ -151,7 +151,7 @@ llvm::Expected<std::string> qualifyAllDecls(const FunctionDecl *FD,
   //
   // Go over all references inside a function body to generate replacements that
   // will qualify those. So that body can be moved into an arbitrary file.
-  // We perform the qualification by qualyfying the first type/decl in a
+  // We perform the qualification by qualifying the first type/decl in a
   // (un)qualified name. e.g:
   //    namespace a { namespace b { class Bar{}; void foo(); } }
   //    b::Bar x; -> a::b::Bar x;
@@ -205,18 +205,15 @@ llvm::Expected<std::string> qualifyAllDecls(const FunctionDecl *FD,
     }
   });
 
-  if (HadErrors) {
-    return llvm::createStringError(
-        llvm::inconvertibleErrorCode(),
-        "define inline: Failed to compute qualifiers see logs for details.");
-  }
+  if (HadErrors)
+    return error(
+        "define inline: Failed to compute qualifiers. See logs for details.");
 
   // Get new begin and end positions for the qualified body.
   auto OrigBodyRange = toHalfOpenFileRange(
       SM, FD->getASTContext().getLangOpts(), FD->getBody()->getSourceRange());
   if (!OrigBodyRange)
-    return llvm::createStringError(llvm::inconvertibleErrorCode(),
-                                   "Couldn't get range func body.");
+    return error("Couldn't get range func body.");
 
   unsigned BodyBegin = SM.getFileOffset(OrigBodyRange->getBegin());
   unsigned BodyEnd = Replacements.getShiftedCodePosition(
@@ -305,15 +302,13 @@ renameParameters(const FunctionDecl *Dest, const FunctionDecl *Source) {
         ReplaceRange = CharSourceRange::getCharRange(RefLoc, RefLoc);
       else
         ReplaceRange = CharSourceRange::getTokenRange(RefLoc, RefLoc);
-      // If occurence is coming from a macro expansion, try to get back to the
+      // If occurrence is coming from a macro expansion, try to get back to the
       // file range.
       if (RefLoc.isMacroID()) {
         ReplaceRange = Lexer::makeFileCharRange(ReplaceRange, SM, LangOpts);
         // Bail out if we need to replace macro bodies.
         if (ReplaceRange.isInvalid()) {
-          auto Err = llvm::createStringError(
-              llvm::inconvertibleErrorCode(),
-              "Cant rename parameter inside macro body.");
+          auto Err = error("Cant rename parameter inside macro body.");
           elog("define inline: {0}", Err);
           return std::move(Err);
         }
@@ -339,7 +334,7 @@ renameParameters(const FunctionDecl *Dest, const FunctionDecl *Source) {
 // specialization.
 const FunctionDecl *findTarget(const FunctionDecl *FD) {
   auto CanonDecl = FD->getCanonicalDecl();
-  if (!FD->isFunctionTemplateSpecialization())
+  if (!FD->isFunctionTemplateSpecialization() || CanonDecl == FD)
     return CanonDecl;
   // For specializations CanonicalDecl is the TemplatedDecl, which is not the
   // target we want to inline into. Instead we traverse previous decls to find
@@ -352,7 +347,7 @@ const FunctionDecl *findTarget(const FunctionDecl *FD) {
   return PrevDecl;
 }
 
-// Returns the begining location for a FunctionDecl. Returns location of
+// Returns the beginning location for a FunctionDecl. Returns location of
 // template keyword for templated functions.
 const SourceLocation getBeginLoc(const FunctionDecl *FD) {
   // Include template parameter list.
@@ -450,11 +445,8 @@ public:
     const auto &SM = AST.getSourceManager();
 
     auto Semicolon = getSemicolonForDecl(Target);
-    if (!Semicolon) {
-      return llvm::createStringError(
-          llvm::inconvertibleErrorCode(),
-          "Couldn't find semicolon for target declaration.");
-    }
+    if (!Semicolon)
+      return error("Couldn't find semicolon for target declaration.");
 
     auto AddInlineIfNecessary = addInlineIfInHeader(Target);
     auto ParamReplacements = renameParameters(Target, Source);
@@ -479,10 +471,8 @@ public:
         SM.getExpansionRange(CharSourceRange::getCharRange(getBeginLoc(Source),
                                                            Source->getEndLoc()))
             .getAsRange());
-    if (!DefRange) {
-      return llvm::createStringError(llvm::inconvertibleErrorCode(),
-                                     "Couldn't get range for the source.");
-    }
+    if (!DefRange)
+      return error("Couldn't get range for the source.");
     unsigned int SourceLen = SM.getFileOffset(DefRange->getEnd()) -
                              SM.getFileOffset(DefRange->getBegin());
     const tooling::Replacement DeleteFuncBody(SM, DefRange->getBegin(),

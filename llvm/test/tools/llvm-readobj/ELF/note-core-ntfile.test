@@ -37,10 +37,9 @@
 
 --- !ELF
 FileHeader:
-  Class:   ELFCLASS64
-  Data:    ELFDATA2LSB
-  Type:    ET_CORE
-  Machine: EM_X86_64
+  Class: ELFCLASS64
+  Data:  ELFDATA2LSB
+  Type:  ET_CORE
 Sections:
   - Name:        .note.foo
     Type:        SHT_NOTE
@@ -65,6 +64,7 @@ ProgramHeaders:
 
 # LLVM:      Notes [
 # LLVM-NEXT:   NoteSection {
+# LLVM-NEXT:     Name: <?>
 # LLVM-NEXT:     Offset:
 # LLVM-NEXT:     Size:
 # LLVM-NEXT:     Note {

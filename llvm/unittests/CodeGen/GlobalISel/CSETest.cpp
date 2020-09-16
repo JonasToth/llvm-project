@@ -11,7 +11,7 @@
 
 namespace {
 
-TEST_F(GISelMITest, TestCSE) {
+TEST_F(AArch64GISelMITest, TestCSE) {
   setUp();
   if (!TM)
     return;
@@ -27,8 +27,8 @@ TEST_F(GISelMITest, TestCSE) {
   B.setCSEInfo(&CSEInfo);
   CSEMIRBuilder CSEB(B.getState());
 
-  CSEB.setInsertPt(*EntryMBB, EntryMBB->begin());
-  unsigned AddReg = MRI->createGenericVirtualRegister(s16);
+  CSEB.setInsertPt(B.getMBB(), B.getInsertPt());
+  Register AddReg = MRI->createGenericVirtualRegister(s16);
   auto MIBAddCopy =
       CSEB.buildInstr(TargetOpcode::G_ADD, {AddReg}, {MIBInput, MIBInput});
   EXPECT_EQ(MIBAddCopy->getOpcode(), TargetOpcode::COPY);
@@ -72,9 +72,42 @@ TEST_F(GISelMITest, TestCSE) {
   auto MIBUnmerge = CSEB.buildUnmerge({s32, s32}, Copies[0]);
   auto MIBUnmerge2 = CSEB.buildUnmerge({s32, s32}, Copies[0]);
   EXPECT_TRUE(&*MIBUnmerge == &*MIBUnmerge2);
+
+  // Check G_IMPLICIT_DEF
+  auto Undef0 = CSEB.buildUndef(s32);
+  auto Undef1 = CSEB.buildUndef(s32);
+  EXPECT_EQ(&*Undef0, &*Undef1);
+
+  // If the observer is installed to the MF, CSE can also
+  // track new instructions built without the CSEBuilder and
+  // the newly built instructions are available for CSEing next
+  // time a build call is made through the CSEMIRBuilder.
+  // Additionally, the CSE implementation lazily hashes instructions
+  // (every build call) to give chance for the instruction to be fully
+  // built (say using .addUse().addDef().. so on).
+  GISelObserverWrapper WrapperObserver(&CSEInfo);
+  RAIIMFObsDelInstaller Installer(*MF, WrapperObserver);
+  MachineIRBuilder RegularBuilder(*MF);
+  RegularBuilder.setInsertPt(*EntryMBB, EntryMBB->begin());
+  auto NonCSEFMul = RegularBuilder.buildInstr(TargetOpcode::G_AND)
+                        .addDef(MRI->createGenericVirtualRegister(s32))
+                        .addUse(Copies[0])
+                        .addUse(Copies[1]);
+  auto CSEFMul =
+      CSEB.buildInstr(TargetOpcode::G_AND, {s32}, {Copies[0], Copies[1]});
+  EXPECT_EQ(&*CSEFMul, &*NonCSEFMul);
+
+  auto ExtractMIB = CSEB.buildInstr(TargetOpcode::G_EXTRACT, {s16},
+                                    {Copies[0], static_cast<uint64_t>(0)});
+  auto ExtractMIB1 = CSEB.buildInstr(TargetOpcode::G_EXTRACT, {s16},
+                                     {Copies[0], static_cast<uint64_t>(0)});
+  auto ExtractMIB2 = CSEB.buildInstr(TargetOpcode::G_EXTRACT, {s16},
+                                     {Copies[0], static_cast<uint64_t>(1)});
+  EXPECT_EQ(&*ExtractMIB, &*ExtractMIB1);
+  EXPECT_NE(&*ExtractMIB, &*ExtractMIB2);
 }
 
-TEST_F(GISelMITest, TestCSEConstantConfig) {
+TEST_F(AArch64GISelMITest, TestCSEConstantConfig) {
   setUp();
   if (!TM)
     return;
@@ -97,5 +130,10 @@ TEST_F(GISelMITest, TestCSEConstantConfig) {
   // We should CSE constant.
   auto MIBZeroTmp = CSEB.buildConstant(s16, 0);
   EXPECT_TRUE(&*MIBZero == &*MIBZeroTmp);
+
+  // Check G_IMPLICIT_DEF
+  auto Undef0 = CSEB.buildUndef(s16);
+  auto Undef1 = CSEB.buildUndef(s16);
+  EXPECT_EQ(&*Undef0, &*Undef1);
 }
 } // namespace

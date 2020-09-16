@@ -27,6 +27,7 @@
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
@@ -412,7 +413,6 @@ public:
 
 private:
   bool adjustLoopLinks();
-  void adjustLoopPreheaders();
   bool adjustLoopBranches();
 
   Loop *OuterLoop;
@@ -580,6 +580,12 @@ struct LoopInterchange : public LoopPass {
     LIT.transform();
     LLVM_DEBUG(dbgs() << "Loops interchanged.\n");
     LoopsInterchanged++;
+
+    assert(InnerLoop->isLCSSAForm(*DT) &&
+           "Inner loop not left in LCSSA form after loop interchange!");
+    assert(OuterLoop->isLCSSAForm(*DT) &&
+           "Outer loop not left in LCSSA form after loop interchange!");
+
     return true;
   }
 };
@@ -617,6 +623,13 @@ bool LoopInterchangeLegality::tightlyNested(Loop *OuterLoop, Loop *InnerLoop) {
   // and outer loop latch doesn't contain any unsafe instructions.
   if (containsUnsafeInstructions(OuterLoopHeader) ||
       containsUnsafeInstructions(OuterLoopLatch))
+    return false;
+
+  // Also make sure the inner loop preheader does not contain any unsafe
+  // instructions. Note that all instructions in the preheader will be moved to
+  // the outer loop header when interchanging.
+  if (InnerLoopPreHeader != OuterLoopHeader &&
+      containsUnsafeInstructions(InnerLoopPreHeader))
     return false;
 
   LLVM_DEBUG(dbgs() << "Loops are perfectly nested\n");
@@ -689,7 +702,7 @@ bool LoopInterchangeLegality::findInductionAndReductions(
       // PHIs in inner loops need to be part of a reduction in the outer loop,
       // discovered when checking the PHIs of the outer loop earlier.
       if (!InnerLoop) {
-        if (OuterInnerReductions.find(&PHI) == OuterInnerReductions.end()) {
+        if (!OuterInnerReductions.count(&PHI)) {
           LLVM_DEBUG(dbgs() << "Inner loop PHI is not part of reductions "
                                "across the outer loop.\n");
           return false;
@@ -903,8 +916,8 @@ areInnerLoopExitPHIsSupported(Loop *InnerL, Loop *OuterL,
       return false;
     if (any_of(PHI.users(), [&Reductions, OuterL](User *U) {
           PHINode *PN = dyn_cast<PHINode>(U);
-          return !PN || (Reductions.find(PN) == Reductions.end() &&
-                         OuterL->contains(PN->getParent()));
+          return !PN ||
+                 (!Reductions.count(PN) && OuterL->contains(PN->getParent()));
         })) {
       return false;
     }
@@ -1300,6 +1313,21 @@ bool LoopInterchangeTransform::transform() {
     LLVM_DEBUG(dbgs() << "splitting InnerLoopHeader done\n");
   }
 
+  // Instructions in the original inner loop preheader may depend on values
+  // defined in the outer loop header. Move them there, because the original
+  // inner loop preheader will become the entry into the interchanged loop nest.
+  // Currently we move all instructions and rely on LICM to move invariant
+  // instructions outside the loop nest.
+  BasicBlock *InnerLoopPreHeader = InnerLoop->getLoopPreheader();
+  BasicBlock *OuterLoopHeader = OuterLoop->getHeader();
+  if (InnerLoopPreHeader != OuterLoopHeader) {
+    SmallPtrSet<Instruction *, 4> NeedsMoving;
+    for (Instruction &I :
+         make_early_inc_range(make_range(InnerLoopPreHeader->begin(),
+                                         std::prev(InnerLoopPreHeader->end()))))
+      I.moveBefore(OuterLoopHeader->getTerminator());
+  }
+
   Transformed |= adjustLoopLinks();
   if (!Transformed) {
     LLVM_DEBUG(dbgs() << "adjustLoopLinks failed\n");
@@ -1317,6 +1345,23 @@ static void moveBBContents(BasicBlock *FromBB, Instruction *InsertBefore) {
 
   ToList.splice(InsertBefore->getIterator(), FromList, FromList.begin(),
                 FromBB->getTerminator()->getIterator());
+}
+
+/// Swap instructions between \p BB1 and \p BB2 but keep terminators intact.
+static void swapBBContents(BasicBlock *BB1, BasicBlock *BB2) {
+  // Save all non-terminator instructions of BB1 into TempInstrs and unlink them
+  // from BB1 afterwards.
+  auto Iter = map_range(*BB1, [](Instruction &I) { return &I; });
+  SmallVector<Instruction *, 4> TempInstrs(Iter.begin(), std::prev(Iter.end()));
+  for (Instruction *I : TempInstrs)
+    I->removeFromParent();
+
+  // Move instructions from BB2 to BB1.
+  moveBBContents(BB2, BB1->getTerminator());
+
+  // Move instructions from TempInstrs to BB2.
+  for (Instruction *I : TempInstrs)
+    I->insertBefore(BB2->getTerminator());
 }
 
 // Update BI to jump to NewBB instead of OldBB. Records updates to the
@@ -1499,8 +1544,7 @@ bool LoopInterchangeTransform::adjustLoopBranches() {
                   InnerLoopPreHeader, DTUpdates, /*MustUpdateOnce=*/false);
   // The outer loop header might or might not branch to the outer latch.
   // We are guaranteed to branch to the inner loop preheader.
-  if (std::find(succ_begin(OuterLoopHeaderBI), succ_end(OuterLoopHeaderBI),
-                OuterLoopLatch) != succ_end(OuterLoopHeaderBI))
+  if (llvm::is_contained(OuterLoopHeaderBI->successors(), OuterLoopLatch))
     updateSuccessor(OuterLoopHeaderBI, OuterLoopLatch, LoopExit, DTUpdates,
                     /*MustUpdateOnce=*/false);
   updateSuccessor(OuterLoopHeaderBI, InnerLoopPreHeader,
@@ -1560,13 +1604,11 @@ bool LoopInterchangeTransform::adjustLoopBranches() {
   // outer loop and all the remains to do is and updating the incoming blocks.
   for (PHINode *PHI : OuterLoopPHIs) {
     PHI->moveBefore(InnerLoopHeader->getFirstNonPHI());
-    assert(OuterInnerReductions.find(PHI) != OuterInnerReductions.end() &&
-           "Expected a reduction PHI node");
+    assert(OuterInnerReductions.count(PHI) && "Expected a reduction PHI node");
   }
   for (PHINode *PHI : InnerLoopPHIs) {
     PHI->moveBefore(OuterLoopHeader->getFirstNonPHI());
-    assert(OuterInnerReductions.find(PHI) != OuterInnerReductions.end() &&
-           "Expected a reduction PHI node");
+    assert(OuterInnerReductions.count(PHI) && "Expected a reduction PHI node");
   }
 
   // Update the incoming blocks for moved PHI nodes.
@@ -1575,33 +1617,31 @@ bool LoopInterchangeTransform::adjustLoopBranches() {
   InnerLoopHeader->replacePhiUsesWith(OuterLoopPreHeader, InnerLoopPreHeader);
   InnerLoopHeader->replacePhiUsesWith(OuterLoopLatch, InnerLoopLatch);
 
+  // Values defined in the outer loop header could be used in the inner loop
+  // latch. In that case, we need to create LCSSA phis for them, because after
+  // interchanging they will be defined in the new inner loop and used in the
+  // new outer loop.
+  IRBuilder<> Builder(OuterLoopHeader->getContext());
+  SmallVector<Instruction *, 4> MayNeedLCSSAPhis;
+  for (Instruction &I :
+       make_range(OuterLoopHeader->begin(), std::prev(OuterLoopHeader->end())))
+    MayNeedLCSSAPhis.push_back(&I);
+  formLCSSAForInstructions(MayNeedLCSSAPhis, *DT, *LI, SE, Builder);
+
   return true;
-}
-
-void LoopInterchangeTransform::adjustLoopPreheaders() {
-  // We have interchanged the preheaders so we need to interchange the data in
-  // the preheader as well.
-  // This is because the content of inner preheader was previously executed
-  // inside the outer loop.
-  BasicBlock *OuterLoopPreHeader = OuterLoop->getLoopPreheader();
-  BasicBlock *InnerLoopPreHeader = InnerLoop->getLoopPreheader();
-  BasicBlock *OuterLoopHeader = OuterLoop->getHeader();
-  BranchInst *InnerTermBI =
-      cast<BranchInst>(InnerLoopPreHeader->getTerminator());
-
-  // These instructions should now be executed inside the loop.
-  // Move instruction into a new block after outer header.
-  moveBBContents(InnerLoopPreHeader, OuterLoopHeader->getTerminator());
-  // These instructions were not executed previously in the loop so move them to
-  // the older inner loop preheader.
-  moveBBContents(OuterLoopPreHeader, InnerTermBI);
 }
 
 bool LoopInterchangeTransform::adjustLoopLinks() {
   // Adjust all branches in the inner and outer loop.
   bool Changed = adjustLoopBranches();
-  if (Changed)
-    adjustLoopPreheaders();
+  if (Changed) {
+    // We have interchanged the preheaders so we need to interchange the data in
+    // the preheaders as well. This is because the content of the inner
+    // preheader was previously executed inside the outer loop.
+    BasicBlock *OuterLoopPreHeader = OuterLoop->getLoopPreheader();
+    BasicBlock *InnerLoopPreHeader = InnerLoop->getLoopPreheader();
+    swapBBContents(OuterLoopPreHeader, InnerLoopPreHeader);
+  }
   return Changed;
 }
 

@@ -34,7 +34,7 @@ If you want to run the test suite, you'll need to build LLDB with Python
 scripting support.
 
 * `Python <http://www.python.org/>`_
-* `SWIG <http://swig.org/>`_
+* `SWIG <http://swig.org/>`_ 2 or later.
 
 Optional Dependencies
 *********************
@@ -71,7 +71,7 @@ commands below.
 ::
 
   > yum install libedit-devel libxml2-devel ncurses-devel python-devel swig
-  > sudo apt-get install build-essential subversion swig python2.7-dev libedit-dev libncurses5-dev
+  > sudo apt-get install build-essential subversion swig python3-dev libedit-dev libncurses5-dev
   > pkg install swig python
   > pkgin install swig python27 cmake ninja-build
   > brew install swig cmake ninja
@@ -79,29 +79,38 @@ commands below.
 Windows
 *******
 
-* Visual Studio 2015 or greater
-* Windows SDK 8.0 or higher. In general it is best to use the latest available
-  version.
-* `GnuWin32 <http://gnuwin32.sourceforge.net/>`_
-* `Python 3.5 or higher <https://www.python.org/downloads/windows/>`_ or
-  higher. Earlier versions of Python can be made to work by compiling your own
-  distribution from source, but this workflow is unsupported and you are own
-  your own.
+* Visual Studio 2017.
+* The latest Windows SDK.
+* The Active Template Library (ATL).
+* `GnuWin32 <http://gnuwin32.sourceforge.net/>`_ for CoreUtils and Make.
+* `Python 3.6 or 3.8 <https://www.python.org/downloads/windows/>`_. Python 3.7
+  is known to be incompatible. Make sure to (1) get the x64 variant if that's
+  what you're targetting and (2) install the debug library if you want to build
+  a debug lldb.
 * `Python Tools for Visual Studio
   <https://github.com/Microsoft/PTVS/releases>`_. If you plan to debug test
   failures or even write new tests at all, PTVS is an indispensable debugging
   extension to VS that enables full editing and debugging support for Python
-  (including mixed native/managed debugging)
+  (including mixed native/managed debugging).
 
 The steps outlined here describes how to set up your system and install the
 required dependencies such that they can be found when needed during the build
 process. They only need to be performed once.
 
-#. Install Visual Studio and the Windows SDK.
+#. Install Visual Studio with the Windows SDK and ATL components.
 #. Install GnuWin32, making sure ``<GnuWin32 install dir>\bin`` is added to
-   your PATH environment variable.
+   your PATH environment variable. Verify that utilities like ``dirname`` and
+   ``make`` are available from your terminal.
 #. Install SWIG for Windows, making sure ``<SWIG install dir>`` is added to
-   your PATH environment variable.
+   your PATH environment variable. Verify that ``swig`` is available from your
+   terminal.
+#. Register the Debug Interface Access DLLs with the Registry from a privileged
+   terminal.
+
+::
+
+> regsvr32 "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\DIA SDK\bin\msdia140.dll"
+> regsvr32 "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\DIA SDK\bin\amd64\msdia140.dll"
 
 Any command prompt from which you build LLDB should have a valid Visual Studio
 environment setup. This means you should run ``vcvarsall.bat`` or open an
@@ -235,7 +244,7 @@ Windows
 
 On Windows the LLDB test suite requires lld. Either add ``lld`` to
 ``LLVM_ENABLE_PROJECTS`` or disable the test suite with
-``LLDB_ENABLE_TESTS=OFF``.
+``LLDB_INCLUDE_TESTS=OFF``.
 
 Although the following CMake variables are by no means Windows specific, they
 are commonly used on Windows.
@@ -286,20 +295,12 @@ the executable and the working directory to point to binaries inside of the
 ninja tree.
 
 
-NetBSD
-^^^^^^
-
-Current stable NetBSD release doesn't ship with libpanel(3), therefore it's
-required to disable curses(3) support with the
-``-DLLDB_ENABLE_CURSES:BOOL=FALSE`` option. To make sure check if
-``/usr/include/panel.h`` exists in your system.
-
 macOS
 ^^^^^
 
 On macOS the LLDB test suite requires libc++. Either add ``libcxx`` to
 ``LLVM_ENABLE_PROJECTS`` or disable the test suite with
-``LLDB_ENABLE_TESTS=OFF``. Further useful options:
+``LLDB_INCLUDE_TESTS=OFF``. Further useful options:
 
 * ``LLDB_BUILD_FRAMEWORK:BOOL``: Builds the LLDB.framework.
 * ``LLDB_CODESIGN_IDENTITY:STRING``: Set the identity to use for code-signing

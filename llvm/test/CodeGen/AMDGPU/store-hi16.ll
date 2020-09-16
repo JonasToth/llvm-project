@@ -314,13 +314,13 @@ entry:
 ; GFX803: v_add{{(_co)?}}_{{i|u}}32_e32
 ; GFX803: v_addc_u32_e32
 
-; GFX9-DAG: v_add_co_u32_e32 v{{[0-9]+}}, vcc, 0xfffff000, v
+; GFX9-DAG: v_add_co_u32_e32 v{{[0-9]+}}, vcc, 0xfffff802, v
 ; GFX9-DAG: v_addc_co_u32_e32 v{{[0-9]+}}, vcc, -1, v
 
 ; GFX906-DAG: v_lshrrev_b32_e32
-; GFX906: flat_store_short v[0:1], v2 offset:2050{{$}}
+; GFX906: flat_store_short v[0:1], v2{{$}}
 
-; GFX900-NEXT: flat_store_short_d16_hi v[0:1], v2 offset:2050{{$}}
+; GFX900-NEXT: flat_store_short_d16_hi v[0:1], v2{{$}}
 ; GFX803: flat_store_short v[0:1], v2{{$}}
 ; GCN-NEXT: s_waitcnt
 ; GCN-NEXT: s_setpc_b64
@@ -363,13 +363,13 @@ entry:
 ; GFX803-DAG: v_add_u32_e32
 ; GFX803-DAG: v_addc_u32_e32
 
-; GFX9-DAG: v_add_co_u32_e32 v{{[0-9]+}}, vcc, 0xfffff000, v
+; GFX9-DAG: v_add_co_u32_e32 v{{[0-9]+}}, vcc, 0xfffff001, v
 ; GFX9-DAG: v_addc_co_u32_e32 v{{[0-9]+}}, vcc, -1, v{{[0-9]+}}, vcc
 
-; GFX900-NEXT: flat_store_byte_d16_hi v[0:1], v2 offset:1{{$}}
+; GFX900-NEXT: flat_store_byte_d16_hi v[0:1], v2{{$}}
 
 ; GFX906-DAG: v_lshrrev_b32_e32 v2, 16, v2
-; GFX906: flat_store_byte v[0:1], v2 offset:1{{$}}
+; GFX906: flat_store_byte v[0:1], v2{{$}}
 
 ; GFX803-DAG: v_lshrrev_b32_e32 v2, 16, v2
 ; GFX803: flat_store_byte v[0:1], v2{{$}}
@@ -389,10 +389,10 @@ entry:
 ; GCN-LABEL: {{^}}store_private_hi_v2i16:
 ; GCN: s_waitcnt
 
-; GFX900-NEXT: buffer_store_short_d16_hi v1, v0, s[0:3], s33 offen{{$}}
+; GFX900-NEXT: buffer_store_short_d16_hi v1, v0, s[0:3], 0 offen{{$}}
 
 ; NO-D16-HI: v_lshrrev_b32_e32 v1, 16, v1
-; NO-D16-HI: buffer_store_short v1, v0, s[0:3], s33 offen{{$}}
+; NO-D16-HI: buffer_store_short v1, v0, s[0:3], 0 offen{{$}}
 
 ; GCN-NEXT: s_waitcnt
 ; GCN-NEXT: s_setpc_b64
@@ -408,10 +408,10 @@ entry:
 ; GCN-LABEL: {{^}}store_private_hi_v2f16:
 ; GCN: s_waitcnt
 
-; GFX900-NEXT: buffer_store_short_d16_hi v1, v0, s[0:3], s33 offen{{$}}
+; GFX900-NEXT: buffer_store_short_d16_hi v1, v0, s[0:3], 0 offen{{$}}
 
 ; NO-D16-HI: v_lshrrev_b32_e32 v1, 16, v1
-; NO-D16-HI: buffer_store_short v1, v0, s[0:3], s33 offen{{$}}
+; NO-D16-HI: buffer_store_short v1, v0, s[0:3], 0 offen{{$}}
 
 ; GCN-NEXT: s_waitcnt
 ; GCN-NEXT: s_setpc_b64
@@ -427,10 +427,10 @@ entry:
 ; GCN-LABEL: {{^}}store_private_hi_i32_shift:
 ; GCN: s_waitcnt
 
-; GFX900-NEXT: buffer_store_short_d16_hi v1, v0, s[0:3], s33 offen{{$}}
+; GFX900-NEXT: buffer_store_short_d16_hi v1, v0, s[0:3], 0 offen{{$}}
 
 ; NO-D16-HI-NEXT: v_lshrrev_b32_e32 v1, 16, v1
-; NO-D16-HI-NEXT: buffer_store_short v1, v0, s[0:3], s33 offen{{$}}
+; NO-D16-HI-NEXT: buffer_store_short v1, v0, s[0:3], 0 offen{{$}}
 
 ; GCN-NEXT: s_waitcnt
 ; GCN-NEXT: s_setpc_b64
@@ -445,10 +445,10 @@ entry:
 ; GCN-LABEL: {{^}}store_private_hi_v2i16_i8:
 ; GCN: s_waitcnt
 
-; GFX900-NEXT: buffer_store_byte_d16_hi v1, v0, s[0:3], s33 offen{{$}}
+; GFX900-NEXT: buffer_store_byte_d16_hi v1, v0, s[0:3], 0 offen{{$}}
 
 ; NO-D16-HI-NEXT: v_lshrrev_b32_e32 v1, 16, v1
-; NO-D16-HI-NEXT: buffer_store_byte v1, v0, s[0:3], s33 offen{{$}}
+; NO-D16-HI-NEXT: buffer_store_byte v1, v0, s[0:3], 0 offen{{$}}
 
 ; GCN-NEXT: s_waitcnt
 ; GCN-NEXT: s_setpc_b64
@@ -464,10 +464,10 @@ entry:
 ; GCN-LABEL: {{^}}store_private_hi_i8_shift:
 ; GCN: s_waitcnt
 
-; GFX900-NEXT: buffer_store_byte_d16_hi v1, v0, s[0:3], s33 offen{{$}}
+; GFX900-NEXT: buffer_store_byte_d16_hi v1, v0, s[0:3], 0 offen{{$}}
 
 ; NO-D16-HI-NEXT: v_lshrrev_b32_e32 v1, 16, v1
-; NO-D16-HI-NEXT: buffer_store_byte v1, v0, s[0:3], s33 offen{{$}}
+; NO-D16-HI-NEXT: buffer_store_byte v1, v0, s[0:3], 0 offen{{$}}
 
 ; GCN-NEXT: s_waitcnt
 ; GCN-NEXT: s_setpc_b64
@@ -502,10 +502,10 @@ entry:
 ; GCN-LABEL: {{^}}store_private_hi_v2i16_nooff:
 ; GCN: s_waitcnt
 
-; GFX900-NEXT: buffer_store_short_d16_hi v0, off, s[0:3], s33{{$}}
+; GFX900-NEXT: buffer_store_short_d16_hi v0, off, s[0:3], 0{{$}}
 
 ; NO-D16-HI-NEXT: v_lshrrev_b32_e32 v0, 16, v0
-; NO-D16-HI-NEXT: buffer_store_short v0, off, s[0:3], s33{{$}}
+; NO-D16-HI-NEXT: buffer_store_short v0, off, s[0:3], 0{{$}}
 
 ; GCN-NEXT: s_waitcnt
 ; GCN-NEXT: s_setpc_b64
@@ -522,10 +522,10 @@ entry:
 ; GCN-LABEL: {{^}}store_private_hi_v2i16_i8_nooff:
 ; GCN: s_waitcnt
 
-; GFX900-NEXT: buffer_store_byte_d16_hi v0, off, s[0:3], s33{{$}}
+; GFX900-NEXT: buffer_store_byte_d16_hi v0, off, s[0:3], 0{{$}}
 
 ; NO-D16-HI: v_lshrrev_b32_e32 v0, 16, v0
-; NO-D16-HI: buffer_store_byte v0, off, s[0:3], s33{{$}}
+; NO-D16-HI: buffer_store_byte v0, off, s[0:3], 0{{$}}
 
 ; GCN-NEXT: s_waitcnt
 ; GCN-NEXT: s_setpc_b64

@@ -67,6 +67,7 @@ public:
 
 private:
   RecTyKind Kind;
+  /// ListRecTy of the list that has elements of this type.
   ListRecTy *ListTy = nullptr;
 
 public:
@@ -190,14 +191,14 @@ public:
   bool typeIsConvertibleTo(const RecTy *RHS) const override;
 };
 
-/// 'list<Ty>' - Represent a list of values, all of which must be of
-/// the specified type.
+/// 'list<Ty>' - Represent a list of element values, all of which must be of
+/// the specified type. The type is stored in ElementTy.
 class ListRecTy : public RecTy {
   friend ListRecTy *RecTy::getListTy();
 
-  RecTy *Ty;
+  RecTy *ElementTy;
 
-  explicit ListRecTy(RecTy *T) : RecTy(ListRecTyKind), Ty(T) {}
+  explicit ListRecTy(RecTy *T) : RecTy(ListRecTyKind), ElementTy(T) {}
 
 public:
   static bool classof(const RecTy *RT) {
@@ -205,7 +206,7 @@ public:
   }
 
   static ListRecTy *get(RecTy *T) { return T->getListTy(); }
-  RecTy *getElementType() const { return Ty; }
+  RecTy *getElementType() const { return ElementTy; }
 
   std::string getAsString() const override;
 
@@ -420,14 +421,14 @@ inline raw_ostream &operator<<(raw_ostream &OS, const Init &I) {
   I.print(OS); return OS;
 }
 
-/// This is the common super-class of types that have a specific,
-/// explicit, type.
+/// This is the common superclass of types that have a specific,
+/// explicit, type, stored in ValueTy.
 class TypedInit : public Init {
-  RecTy *Ty;
+  RecTy *ValueTy;
 
 protected:
   explicit TypedInit(InitKind K, RecTy *T, uint8_t Opc = 0)
-    : Init(K, Opc), Ty(T) {}
+      : Init(K, Opc), ValueTy(T) {}
 
 public:
   TypedInit(const TypedInit &) = delete;
@@ -438,7 +439,7 @@ public:
            I->getKind() <= IK_LastTypedInit;
   }
 
-  RecTy *getType() const { return Ty; }
+  RecTy *getType() const { return ValueTy; }
 
   Init *getCastTo(RecTy *Ty) const override;
   Init *convertInitializerTo(RecTy *Ty) const override;
@@ -1295,6 +1296,7 @@ public:
   Init *resolveReferences(Resolver &R) const override;
   Init *Fold(Record *CurRec) const;
 
+  bool isConcrete() const override;
   std::string getAsString() const override {
     return Rec->getAsString() + "." + FieldName->getValue().str();
   }
@@ -1602,11 +1604,6 @@ public:
   /// The resolver should not resolve any of the fields itself, to avoid
   /// recursion / infinite loops.
   void resolveReferences(Resolver &R, const RecordVal *SkipVal = nullptr);
-
-  /// If anything in this record refers to RV, replace the
-  /// reference to RV with the RHS of RV.  If RV is null, we resolve all
-  /// possible references.
-  void resolveReferencesTo(const RecordVal *RV);
 
   RecordKeeper &getRecords() const {
     return TrackedRecords;

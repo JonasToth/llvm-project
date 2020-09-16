@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLDB_lldb_enumerations_h_
-#define LLDB_lldb_enumerations_h_
+#ifndef LLDB_LLDB_ENUMERATIONS_H
+#define LLDB_LLDB_ENUMERATIONS_H
 
 #include <type_traits>
 
@@ -126,6 +126,9 @@ FLAGS_ENUM(LaunchFlags){
     eLaunchFlagShellExpandArguments =
         (1u << 10), ///< Perform shell-style argument expansion
     eLaunchFlagCloseTTYOnExit = (1u << 11), ///< Close the open TTY on exit
+    eLaunchFlagInheritTCCFromParent =
+        (1u << 12), ///< Don't make the inferior responsible for its own TCC
+                    ///< permissions but instead inherit them from its parent.
 };
 
 /// Thread Run Modes.
@@ -269,7 +272,8 @@ enum ExpressionResults {
   eExpressionHitBreakpoint,
   eExpressionTimedOut,
   eExpressionResultUnavailable,
-  eExpressionStoppedForDebug
+  eExpressionStoppedForDebug,
+  eExpressionThreadVanished
 };
 
 enum SearchDepth {
@@ -525,6 +529,7 @@ enum CommandArgumentType {
   eArgTypeExpression,
   eArgTypeExpressionPath,
   eArgTypeExprFormat,
+  eArgTypeFileLineColumn,
   eArgTypeFilename,
   eArgTypeFormat,
   eArgTypeFrameIndex,
@@ -591,6 +596,7 @@ enum CommandArgumentType {
   eArgRawInput,
   eArgTypeCommand,
   eArgTypeColumnNum,
+  eArgTypeModuleUUID,
   eArgTypeLastArg // Always keep this entry as the last entry in this
                   // enumeration!!
 };
@@ -695,6 +701,7 @@ enum SectionType {
   eSectionTypeDWARFDebugRngListsDwo,
   eSectionTypeDWARFDebugLocDwo,
   eSectionTypeDWARFDebugLocListsDwo,
+  eSectionTypeDWARFDebugTuIndex,
 };
 
 FLAGS_ENUM(EmulateInstructionOptions){
@@ -1080,6 +1087,20 @@ enum TypeSummaryCapping {
   eTypeSummaryCapped = true,
   eTypeSummaryUncapped = false
 };
+
+/// The result from a command interpreter run.
+enum CommandInterpreterResult {
+  /// Command interpreter finished successfully.
+  eCommandInterpreterResultSuccess,
+  /// Stopped because the corresponding option was set and the inferior
+  /// crashed.
+  eCommandInterpreterResultInferiorCrash,
+  /// Stopped because the corresponding option was set and a command returned
+  /// an error.
+  eCommandInterpreterResultCommandError,
+  /// Stopped because quit was requested.
+  eCommandInterpreterResultQuitRequested,
+};
 } // namespace lldb
 
-#endif // LLDB_lldb_enumerations_h_
+#endif // LLDB_LLDB_ENUMERATIONS_H

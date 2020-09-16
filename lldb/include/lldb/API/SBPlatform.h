@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLDB_SBPlatform_h_
-#define LLDB_SBPlatform_h_
+#ifndef LLDB_API_SBPLATFORM_H
+#define LLDB_API_SBPLATFORM_H
 
 #include "lldb/API/SBDefines.h"
 
@@ -51,6 +51,7 @@ protected:
 
 class LLDB_API SBPlatformShellCommand {
 public:
+  SBPlatformShellCommand(const char *shell, const char *shell_command);
   SBPlatformShellCommand(const char *shell_command);
 
   SBPlatformShellCommand(const SBPlatformShellCommand &rhs);
@@ -60,6 +61,10 @@ public:
   ~SBPlatformShellCommand();
 
   void Clear();
+
+  const char *GetShell();
+
+  void SetShell(const char *shell);
 
   const char *GetCommand();
 
@@ -96,6 +101,8 @@ public:
   SBPlatform &operator=(const SBPlatform &rhs);
 
   ~SBPlatform();
+
+  static SBPlatform GetHostPlatform();
 
   explicit operator bool() const;
 
@@ -152,6 +159,14 @@ public:
 
   SBUnixSignals GetUnixSignals() const;
 
+  /// Return the environment variables of the remote platform connection
+  /// process.
+  ///
+  /// \return
+  ///     An lldb::SBEnvironment object which is a copy of the platform's
+  ///     environment.
+  SBEnvironment GetEnvironment();
+
 protected:
   friend class SBDebugger;
   friend class SBTarget;
@@ -169,4 +184,4 @@ protected:
 
 } // namespace lldb
 
-#endif // LLDB_SBPlatform_h_
+#endif // LLDB_API_SBPLATFORM_H

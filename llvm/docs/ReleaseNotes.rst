@@ -1,12 +1,12 @@
 =========================
-LLVM 11.0.0 Release Notes
+LLVM 12.0.0 Release Notes
 =========================
 
 .. contents::
     :local:
 
 .. warning::
-   These are in-progress notes for the upcoming LLVM 11 release.
+   These are in-progress notes for the upcoming LLVM 12 release.
    Release notes for previous releases can be found on
    `the Download Page <https://releases.llvm.org/download.html>`_.
 
@@ -15,7 +15,7 @@ Introduction
 ============
 
 This document contains the release notes for the LLVM Compiler Infrastructure,
-release 11.0.0.  Here we describe the status of LLVM, including major improvements
+release 12.0.0.  Here we describe the status of LLVM, including major improvements
 from the previous release, improvements in various subprojects of LLVM, and
 some of the current users of the code.  All LLVM releases may be downloaded
 from the `LLVM releases web site <https://llvm.org/releases/>`_.
@@ -40,7 +40,8 @@ Non-comprehensive list of changes in this release
    functionality, or simply have a lot to talk about), see the `NOTE` below
    for adding a new subsection.
 
-* ...
+* The ConstantPropagation pass was removed. Users should use the InstSimplify
+  pass instead.
 
 
 .. NOTE
@@ -57,15 +58,29 @@ Non-comprehensive list of changes in this release
 Changes to the LLVM IR
 ----------------------
 
+* ...
+
+* Added the ``byref`` attribute to better represent argument passing
+  for the `amdgpu_kernel` calling convention.
 
 Changes to building LLVM
 ------------------------
+
+Changes to TableGen
+-------------------
+
+* The new "TableGen Programmer's Reference" replaces the "TableGen Language
+  Introduction" and "TableGen Language Reference" documents.
+
+* The syntax for specifying an integer range in a range list has changed.
+  The old syntax used a hyphen in the range (e.g., ``{0-9}``). The new syntax
+  uses the "`...`" range punctuation (e.g., ``{0...9}``). The hyphen syntax
+  is deprecated.
 
 Changes to the ARM Backend
 --------------------------
 
 During this release ...
-
 
 Changes to the MIPS Target
 --------------------------
@@ -83,9 +98,26 @@ Changes to the X86 Target
 
 During this release ...
 
+* The 'mpx' feature was removed from the backend. It had been removed from clang
+  frontend in 10.0. Mention of the 'mpx' feature in an IR file will print a
+  message to stderr, but IR should still compile.
+* Support for -march=sapphirerapids was added.
+* The assembler now has support for {disp32} and {disp8} pseudo prefixes for
+  controlling displacement size for memory operands and jump displacements. The
+  assembler also supports the .d32 and .d8 mnemonic suffixes to do the same.
+* A new function attribute "tune-cpu" has been added to support -mtune like gcc.
+  This allows microarchitectural optimizations to be applied independent from
+  the "target-cpu" attribute or TargetMachine CPU which will be used to select
+  Instruction Set. If the attribute is not present, the tune CPU will follow
+  the target CPU.
 
 Changes to the AMDGPU Target
 -----------------------------
+
+During this release ...
+
+* The new ``byref`` attribute is now the preferred method for
+  representing aggregate kernel arguments.
 
 Changes to the AVR Target
 -----------------------------
@@ -96,7 +128,6 @@ Changes to the WebAssembly Target
 ---------------------------------
 
 During this release ...
-
 
 Changes to the OCaml bindings
 -----------------------------
@@ -114,14 +145,34 @@ Changes to the Go bindings
 Changes to the DAG infrastructure
 ---------------------------------
 
-Changes to LLDB
-===============
 
-External Open Source Projects Using LLVM 11
+Changes to the Debug Info
+---------------------------------
+
+During this release ...
+
+Changes to the LLVM tools
+---------------------------------
+
+* llvm-readobj and llvm-readelf behavior has changed to report an error when
+  executed with no input files instead of reading an input from stdin.
+  Reading from stdin can still be achieved by specifying `-` as an input file.
+
+Changes to LLDB
+---------------------------------
+
+Changes to Sanitizers
+---------------------
+
+The integer sanitizer `-fsanitize=integer` now has a new sanitizer:
+`-fsanitize=unsigned-shift-base`. It's not undefined behavior for an unsigned
+left shift to overflow (i.e. to shift bits out), but it has been the source of
+bugs and exploits in certain codebases in the past.
+
+External Open Source Projects Using LLVM 12
 ===========================================
 
 * A project...
-
 
 Additional Information
 ======================

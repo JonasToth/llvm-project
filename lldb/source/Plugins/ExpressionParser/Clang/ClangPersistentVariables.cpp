@@ -101,9 +101,21 @@ ClangPersistentVariables::GetPersistentDecl(ConstString name) {
   return m_persistent_decls.lookup(name.GetCString()).m_decl;
 }
 
-lldb::ClangASTImporterSP ClangPersistentVariables::GetClangASTImporter() {
+std::shared_ptr<ClangASTImporter>
+ClangPersistentVariables::GetClangASTImporter() {
   if (!m_ast_importer_sp) {
     m_ast_importer_sp = std::make_shared<ClangASTImporter>();
   }
   return m_ast_importer_sp;
+}
+
+ConstString
+ClangPersistentVariables::GetNextPersistentVariableName(bool is_error) {
+  llvm::SmallString<64> name;
+  {
+    llvm::raw_svector_ostream os(name);
+    os << GetPersistentVariablePrefix(is_error)
+       << m_next_persistent_variable_id++;
+  }
+  return ConstString(name);
 }

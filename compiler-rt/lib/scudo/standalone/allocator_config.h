@@ -40,31 +40,32 @@ struct AndroidConfig {
   using SizeClassMap = AndroidSizeClassMap;
 #if SCUDO_CAN_USE_PRIMARY64
   // 256MB regions
-  typedef SizeClassAllocator64<SizeClassMap, 28U,
+  typedef SizeClassAllocator64<SizeClassMap, 28U, 1000, 1000,
                                /*MaySupportMemoryTagging=*/true>
       Primary;
 #else
   // 256KB regions
-  typedef SizeClassAllocator32<SizeClassMap, 18U> Primary;
+  typedef SizeClassAllocator32<SizeClassMap, 18U, 1000, 1000> Primary;
 #endif
   // Cache blocks up to 2MB
-  typedef MapAllocator<MapAllocatorCache<32U, 2UL << 20>> Secondary;
+  typedef MapAllocator<MapAllocatorCache<256U, 32U, 2UL << 20, 0, 1000>>
+      Secondary;
   template <class A>
-  using TSDRegistryT = TSDRegistrySharedT<A, 2U>; // Shared, max 2 TSDs.
+  using TSDRegistryT = TSDRegistrySharedT<A, 8U, 2U>; // Shared, max 8 TSDs.
 };
 
 struct AndroidSvelteConfig {
   using SizeClassMap = SvelteSizeClassMap;
 #if SCUDO_CAN_USE_PRIMARY64
   // 128MB regions
-  typedef SizeClassAllocator64<SizeClassMap, 27U> Primary;
+  typedef SizeClassAllocator64<SizeClassMap, 27U, 1000, 1000> Primary;
 #else
   // 64KB regions
-  typedef SizeClassAllocator32<SizeClassMap, 16U> Primary;
+  typedef SizeClassAllocator32<SizeClassMap, 16U, 1000, 1000> Primary;
 #endif
-  typedef MapAllocator<MapAllocatorCache<4U, 1UL << 18>> Secondary;
+  typedef MapAllocator<MapAllocatorCache<16U, 4U, 1UL << 18, 0, 0>> Secondary;
   template <class A>
-  using TSDRegistryT = TSDRegistrySharedT<A, 1U>; // Shared, only 1 TSD.
+  using TSDRegistryT = TSDRegistrySharedT<A, 2U, 1U>; // Shared, max 2 TSDs.
 };
 
 #if SCUDO_CAN_USE_PRIMARY64
@@ -73,7 +74,7 @@ struct FuchsiaConfig {
   typedef SizeClassAllocator64<DefaultSizeClassMap, 30U> Primary;
   typedef MapAllocator<MapAllocatorNoCache> Secondary;
   template <class A>
-  using TSDRegistryT = TSDRegistrySharedT<A, 8U>; // Shared, max 8 TSDs.
+  using TSDRegistryT = TSDRegistrySharedT<A, 8U, 4U>; // Shared, max 8 TSDs.
 };
 #endif
 

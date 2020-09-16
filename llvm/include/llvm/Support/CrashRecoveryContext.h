@@ -99,7 +99,8 @@ public:
 
   /// Explicitly trigger a crash recovery in the current process, and
   /// return failure from RunSafely(). This function does not return.
-  void HandleCrash();
+  LLVM_ATTRIBUTE_NORETURN
+  void HandleExit(int RetCode);
 
   /// In case of a crash, this is the crash identifier.
   int RetCode = 0;
@@ -180,7 +181,7 @@ public:
       : CrashRecoveryContextCleanupBase<
             CrashRecoveryContextDestructorCleanup<T>, T>(context, resource) {}
 
-  virtual void recoverResources() {
+  void recoverResources() override {
     this->resource->~T();
   }
 };

@@ -29,11 +29,11 @@
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/LLVMRemarkStreamer.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassTimingInfo.h"
-#include "llvm/IR/RemarkStreamer.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/LTO/LTO.h"
@@ -134,10 +134,12 @@ void LTOCodeGenerator::initializeLTOPasses() {
   initializeSimpleInlinerPass(R);
   initializePruneEHPass(R);
   initializeGlobalDCELegacyPassPass(R);
+  initializeOpenMPOptLegacyPassPass(R);
   initializeArgPromotionPass(R);
   initializeJumpThreadingPass(R);
   initializeSROALegacyPassPass(R);
   initializeAttributorLegacyPassPass(R);
+  initializeAttributorCGSCCLegacyPassPass(R);
   initializePostOrderFunctionAttrsLegacyPassPass(R);
   initializeReversePostOrderFunctionAttrsLegacyPassPass(R);
   initializeGlobalsAAWrapperPassPass(R);
@@ -464,8 +466,6 @@ void LTOCodeGenerator::applyScopeRestrictions() {
 
   internalizeModule(*MergedModule, mustPreserveGV);
 
-  MergedModule->addModuleFlag(Module::Error, "LTOPostLink", 1);
-
   ScopeRestrictionsDone = true;
 }
 
@@ -527,8 +527,8 @@ bool LTOCodeGenerator::optimize(bool DisableVerify, bool DisableInline,
     return false;
 
   auto DiagFileOrErr =
-      lto::setupOptimizationRemarks(Context, RemarksFilename, RemarksPasses,
-                                    RemarksFormat, RemarksWithHotness);
+      lto::setupLLVMOptimizationRemarks(Context, RemarksFilename, RemarksPasses,
+                                        RemarksFormat, RemarksWithHotness);
   if (!DiagFileOrErr) {
     errs() << "Error: " << toString(DiagFileOrErr.takeError()) << "\n";
     report_fatal_error("Can't get an output file for the remarks");
@@ -556,6 +556,9 @@ bool LTOCodeGenerator::optimize(bool DisableVerify, bool DisableInline,
 
   // Mark which symbols can not be internalized
   this->applyScopeRestrictions();
+
+  // Write LTOPostLink flag for passes that require all the modules.
+  MergedModule->addModuleFlag(Module::Error, "LTOPostLink", 1);
 
   // Instantiate the pass manager to organize the passes.
   legacy::PassManager passes;
@@ -630,9 +633,9 @@ bool LTOCodeGenerator::compileOptimized(ArrayRef<raw_pwrite_stream *> Out) {
   return true;
 }
 
-void LTOCodeGenerator::setCodeGenDebugOptions(ArrayRef<const char *> Options) {
+void LTOCodeGenerator::setCodeGenDebugOptions(ArrayRef<StringRef> Options) {
   for (StringRef Option : Options)
-    CodegenOptions.push_back(std::string(Option));
+    CodegenOptions.push_back(Option.str());
 }
 
 void LTOCodeGenerator::parseCodeGenDebugOptions() {

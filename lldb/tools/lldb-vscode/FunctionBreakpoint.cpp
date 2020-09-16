@@ -18,10 +18,13 @@ void FunctionBreakpoint::SetBreakpoint() {
   if (functionName.empty())
     return;
   bp = g_vsc.target.BreakpointCreateByName(functionName.c_str());
+  // See comments in BreakpointBase::GetBreakpointLabel() for details of why
+  // we add a label to our breakpoints.
+  bp.AddName(GetBreakpointLabel());
   if (!condition.empty())
     SetCondition();
   if (!hitCondition.empty())
     SetHitCondition();
 }
 
-}
+} // namespace lldb_vscode

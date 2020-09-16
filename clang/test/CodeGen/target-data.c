@@ -14,6 +14,10 @@
 // RUN:     FileCheck --check-prefix=I686-CYGWIN %s
 // I686-CYGWIN: target datalayout = "e-m:x-p:32:32-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:32-n8:16:32-a:0:32-S32"
 
+// RUN: %clang_cc1 -triple i686-pc-macho -emit-llvm -o - %s | \
+// RUN:     FileCheck --check-prefix=I686-MACHO %s
+// I686-MACHO: target datalayout = "e-m:o-p:32:32-p270:32:32-p271:32:32-p272:64:64-f64:32:64-f80:32-n8:16:32-S128"
+
 // RUN: %clang_cc1 -triple x86_64-unknown-unknown -emit-llvm -o - %s | \
 // RUN:     FileCheck --check-prefix=X86_64 %s
 // X86_64: target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
@@ -126,6 +130,10 @@
 // RUN: FileCheck %s -check-prefix=PPC64-FREEBSD
 // PPC64-FREEBSD: target datalayout = "E-m:e-i64:64-n32:64"
 
+// RUN: %clang_cc1 -triple powerpc64le-freebsd -o - -emit-llvm %s | \
+// RUN: FileCheck %s -check-prefix=PPC64LE-FREEBSD
+// PPC64LE-FREEBSD: target datalayout = "e-m:e-i64:64-n32:64"
+
 // RUN: %clang_cc1 -triple powerpc64-linux -o - -emit-llvm %s | \
 // RUN: FileCheck %s -check-prefix=PPC64-LINUX
 // PPC64-LINUX: target datalayout = "E-m:e-i64:64-n32:64"
@@ -193,6 +201,20 @@
 
 // RUN: %clang_cc1 -triple s390x-unknown -o - -emit-llvm %s | \
 // RUN: FileCheck %s -check-prefix=SYSTEMZ
+// RUN: %clang_cc1 -triple s390x-unknown -target-cpu z10 -o - -emit-llvm %s | \
+// RUN: FileCheck %s -check-prefix=SYSTEMZ
+// RUN: %clang_cc1 -triple s390x-unknown -target-cpu arch8 -o - -emit-llvm %s | \
+// RUN: FileCheck %s -check-prefix=SYSTEMZ
+// RUN: %clang_cc1 -triple s390x-unknown -target-cpu z196 -o - -emit-llvm %s | \
+// RUN: FileCheck %s -check-prefix=SYSTEMZ
+// RUN: %clang_cc1 -triple s390x-unknown -target-cpu arch9 -o - -emit-llvm %s | \
+// RUN: FileCheck %s -check-prefix=SYSTEMZ
+// RUN: %clang_cc1 -triple s390x-unknown -target-cpu zEC12 -o - -emit-llvm %s | \
+// RUN: FileCheck %s -check-prefix=SYSTEMZ
+// RUN: %clang_cc1 -triple s390x-unknown -target-cpu arch10 -o - -emit-llvm %s | \
+// RUN: FileCheck %s -check-prefix=SYSTEMZ
+// RUN: %clang_cc1 -triple s390x-unknown -target-cpu z13 -target-feature +soft-float -o - -emit-llvm %s | \
+// RUN: FileCheck %s -check-prefix=SYSTEMZ
 // SYSTEMZ: target datalayout = "E-m:e-i1:8:16-i8:8:16-i64:64-f128:64-a:8:16-n32:64"
 
 // RUN: %clang_cc1 -triple s390x-unknown -target-cpu z13 -o - -emit-llvm %s | \
@@ -231,8 +253,12 @@
 
 // RUN: %clang_cc1 -triple bpfel -o - -emit-llvm %s | \
 // RUN: FileCheck %s -check-prefix=BPFEL
-// BPFEL: target datalayout = "e-m:e-p:64:64-i64:64-n32:64-S128"
+// BPFEL: target datalayout = "e-m:e-p:64:64-i64:64-i128:128-n32:64-S128"
 
 // RUN: %clang_cc1 -triple bpfeb -o - -emit-llvm %s | \
 // RUN: FileCheck %s -check-prefix=BPFEB
-// BPFEB: target datalayout = "E-m:e-p:64:64-i64:64-n32:64-S128"
+// BPFEB: target datalayout = "E-m:e-p:64:64-i64:64-i128:128-n32:64-S128"
+
+// RUN: %clang_cc1 -triple ve -o - -emit-llvm %s | \
+// RUN: FileCheck %s -check-prefix=VE
+// VE: target datalayout = "e-m:e-i64:64-n32:64-S128"

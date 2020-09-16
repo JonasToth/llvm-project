@@ -16,8 +16,9 @@
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/CodeGen/Register.h"
+#include "llvm/Support/Alignment.h"
 #include "llvm/Support/LowLevelTypeImpl.h"
-#include "llvm/Support/MachineValueType.h"
+#include <cstdint>
 
 namespace llvm {
 
@@ -27,14 +28,15 @@ class MachineInstr;
 class MachineOperand;
 class MachineOptimizationRemarkEmitter;
 class MachineOptimizationRemarkMissed;
+struct MachinePointerInfo;
 class MachineRegisterInfo;
 class MCInstrDesc;
 class RegisterBankInfo;
 class TargetInstrInfo;
+class TargetLowering;
 class TargetPassConfig;
 class TargetRegisterInfo;
 class TargetRegisterClass;
-class Twine;
 class ConstantFP;
 class APFloat;
 
@@ -61,7 +63,7 @@ Register constrainOperandRegClass(const MachineFunction &MF,
                                   const RegisterBankInfo &RBI,
                                   MachineInstr &InsertPt,
                                   const TargetRegisterClass &RegClass,
-                                  const MachineOperand &RegMO, unsigned OpIdx);
+                                  const MachineOperand &RegMO);
 
 /// Try to constrain Reg so that it is usable by argument OpIdx of the
 /// provided MCInstrDesc \p II. If this fails, create a new virtual
@@ -93,6 +95,11 @@ bool constrainSelectedInstRegOperands(MachineInstr &I,
                                       const TargetInstrInfo &TII,
                                       const TargetRegisterInfo &TRI,
                                       const RegisterBankInfo &RBI);
+
+/// Check if DstReg can be replaced with SrcReg depending on the register
+/// constraints.
+bool canReplaceReg(Register DstReg, Register SrcReg, MachineRegisterInfo &MRI);
+
 /// Check whether an instruction \p MI is dead: it only defines dead virtual
 /// registers, and doesn't have other side effects.
 bool isTriviallyDead(const MachineInstr &MI, const MachineRegisterInfo &MRI);
@@ -107,6 +114,12 @@ void reportGISelFailure(MachineFunction &MF, const TargetPassConfig &TPC,
                         MachineOptimizationRemarkEmitter &MORE,
                         const char *PassName, StringRef Msg,
                         const MachineInstr &MI);
+
+/// Report an ISel warning as a missed optimization remark to the LLVMContext's
+/// diagnostic stream.
+void reportGISelWarning(MachineFunction &MF, const TargetPassConfig &TPC,
+                        MachineOptimizationRemarkEmitter &MORE,
+                        MachineOptimizationRemarkMissed &R);
 
 /// If \p VReg is defined by a G_CONSTANT fits in int64_t
 /// returns it.
@@ -138,11 +151,17 @@ const ConstantFP* getConstantFPVRegVal(Register VReg,
 MachineInstr *getOpcodeDef(unsigned Opcode, Register Reg,
                            const MachineRegisterInfo &MRI);
 
-/// Find the def instruction for \p Reg, folding away any trivial copies. Note
-/// it may still return a COPY, if it changes the type. May return nullptr if \p
-/// Reg is not a generic virtual register.
+/// Find the def instruction for \p Reg, folding away any trivial copies. May
+/// return nullptr if \p Reg is not a generic virtual register.
 MachineInstr *getDefIgnoringCopies(Register Reg,
                                    const MachineRegisterInfo &MRI);
+
+/// Find the source register for \p Reg, folding away any trivial copies. It
+/// will be an output register of the instruction that getDefIgnoringCopies
+/// returns. May return an invalid register if \p Reg is not a generic virtual
+/// register.
+Register getSrcRegIgnoringCopies(Register Reg,
+                                 const MachineRegisterInfo &MRI);
 
 /// Returns an APFloat from Val converted to the appropriate size.
 APFloat getAPFloatFromSize(double Val, unsigned Size);
@@ -151,11 +170,11 @@ APFloat getAPFloatFromSize(double Val, unsigned Size);
 /// fallback.
 void getSelectionDAGFallbackAnalysisUsage(AnalysisUsage &AU);
 
-Optional<APInt> ConstantFoldBinOp(unsigned Opcode, const unsigned Op1,
-                                  const unsigned Op2,
+Optional<APInt> ConstantFoldBinOp(unsigned Opcode, const Register Op1,
+                                  const Register Op2,
                                   const MachineRegisterInfo &MRI);
 
-Optional<APInt> ConstantFoldExtOp(unsigned Opcode, const unsigned Op1,
+Optional<APInt> ConstantFoldExtOp(unsigned Opcode, const Register Op1,
                                   uint64_t Imm, const MachineRegisterInfo &MRI);
 
 /// Returns true if \p Val can be assumed to never be a NaN. If \p SNaN is true,
@@ -168,5 +187,67 @@ inline bool isKnownNeverSNaN(Register Val, const MachineRegisterInfo &MRI) {
   return isKnownNeverNaN(Val, MRI, true);
 }
 
+Align inferAlignFromPtrInfo(MachineFunction &MF, const MachinePointerInfo &MPO);
+
+/// Return a virtual register corresponding to the incoming argument register \p
+/// PhysReg. This register is expected to have class \p RC, and optional type \p
+/// RegTy. This assumes all references to the register will use the same type.
+///
+/// If there is an existing live-in argument register, it will be returned.
+/// This will also ensure there is a valid copy
+Register getFunctionLiveInPhysReg(MachineFunction &MF, const TargetInstrInfo &TII,
+                                  MCRegister PhysReg,
+                                  const TargetRegisterClass &RC,
+                                  LLT RegTy = LLT());
+
+/// Return the least common multiple type of \p OrigTy and \p TargetTy, by changing the
+/// number of vector elements or scalar bitwidth. The intent is a
+/// G_MERGE_VALUES, G_BUILD_VECTOR, or G_CONCAT_VECTORS can be constructed from
+/// \p OrigTy elements, and unmerged into \p TargetTy
+LLVM_READNONE
+LLT getLCMType(LLT OrigTy, LLT TargetTy);
+
+/// Return a type where the total size is the greatest common divisor of \p
+/// OrigTy and \p TargetTy. This will try to either change the number of vector
+/// elements, or bitwidth of scalars. The intent is the result type can be used
+/// as the result of a G_UNMERGE_VALUES from \p OrigTy, and then some
+/// combination of G_MERGE_VALUES, G_BUILD_VECTOR and G_CONCAT_VECTORS (possibly
+/// with intermediate casts) can re-form \p TargetTy.
+///
+/// If these are vectors with different element types, this will try to produce
+/// a vector with a compatible total size, but the element type of \p OrigTy. If
+/// this can't be satisfied, this will produce a scalar smaller than the
+/// original vector elements.
+///
+/// In the worst case, this returns LLT::scalar(1)
+LLVM_READNONE
+LLT getGCDType(LLT OrigTy, LLT TargetTy);
+
+/// \returns The splat index of a G_SHUFFLE_VECTOR \p MI when \p MI is a splat.
+/// If \p MI is not a splat, returns None.
+Optional<int> getSplatIndex(MachineInstr &MI);
+
+/// Returns a scalar constant of a G_BUILD_VECTOR splat if it exists.
+Optional<int64_t> getBuildVectorConstantSplat(const MachineInstr &MI,
+                                              const MachineRegisterInfo &MRI);
+
+/// Return true if the specified instruction is a G_BUILD_VECTOR or
+/// G_BUILD_VECTOR_TRUNC where all of the elements are 0 or undef.
+bool isBuildVectorAllZeros(const MachineInstr &MI,
+                           const MachineRegisterInfo &MRI);
+
+/// Return true if the specified instruction is a G_BUILD_VECTOR or
+/// G_BUILD_VECTOR_TRUNC where all of the elements are ~0 or undef.
+bool isBuildVectorAllOnes(const MachineInstr &MI,
+                          const MachineRegisterInfo &MRI);
+
+/// Returns true if given the TargetLowering's boolean contents information,
+/// the value \p Val contains a true value.
+bool isConstTrueVal(const TargetLowering &TLI, int64_t Val, bool IsVector,
+                    bool IsFP);
+
+/// Returns an integer representing true, as defined by the
+/// TargetBooleanContents.
+int64_t getICmpTrueVal(const TargetLowering &TLI, bool IsVector, bool IsFP);
 } // End namespace llvm.
 #endif

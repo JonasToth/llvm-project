@@ -43,13 +43,18 @@ def gi_vop3omods :
     GIComplexOperandMatcher<s32, "selectVOP3OMods">,
     GIComplexPatternEquiv<VOP3OMods>;
 
-def gi_vop3opselmods0 :
-    GIComplexOperandMatcher<s32, "selectVOP3OpSelMods0">,
-    GIComplexPatternEquiv<VOP3OpSelMods0>;
+def gi_vop3pmods :
+    GIComplexOperandMatcher<s32, "selectVOP3PMods">,
+    GIComplexPatternEquiv<VOP3PMods>;
 
 def gi_vop3opselmods :
     GIComplexOperandMatcher<s32, "selectVOP3OpSelMods">,
     GIComplexPatternEquiv<VOP3OpSelMods>;
+
+// FIXME: Why do we have both VOP3OpSel and VOP3OpSelMods?
+def gi_vop3opsel :
+    GIComplexOperandMatcher<s32, "selectVOP3OpSelMods">,
+    GIComplexPatternEquiv<VOP3OpSel>;
 
 def gi_smrd_imm :
     GIComplexOperandMatcher<s64, "selectSmrdImm">,
@@ -63,19 +68,15 @@ def gi_smrd_sgpr :
     GIComplexOperandMatcher<s64, "selectSmrdSgpr">,
     GIComplexPatternEquiv<SMRDSgpr>;
 
-// FIXME: Why are the atomic versions separated?
 def gi_flat_offset :
     GIComplexOperandMatcher<s64, "selectFlatOffset">,
     GIComplexPatternEquiv<FLATOffset>;
 def gi_flat_offset_signed :
     GIComplexOperandMatcher<s64, "selectFlatOffsetSigned">,
     GIComplexPatternEquiv<FLATOffsetSigned>;
-def gi_flat_atomic :
-    GIComplexOperandMatcher<s64, "selectFlatOffset">,
-    GIComplexPatternEquiv<FLATAtomic>;
-def gi_flat_signed_atomic :
-    GIComplexOperandMatcher<s64, "selectFlatOffsetSigned">,
-    GIComplexPatternEquiv<FLATSignedAtomic>;
+def gi_global_saddr :
+    GIComplexOperandMatcher<s64, "selectGlobalSAddr">,
+    GIComplexPatternEquiv<GlobalSAddr>;
 
 def gi_mubuf_scratch_offset :
     GIComplexOperandMatcher<s32, "selectMUBUFScratchOffset">,
@@ -92,6 +93,10 @@ def gi_ds_64bit_4byte_aligned :
     GIComplexOperandMatcher<s64, "selectDS64Bit4ByteAligned">,
     GIComplexPatternEquiv<DS64Bit4ByteAligned>;
 
+def gi_ds_128bit_8byte_aligned :
+    GIComplexOperandMatcher<s64, "selectDS128Bit8ByteAligned">,
+    GIComplexPatternEquiv<DS128Bit8ByteAligned>;
+
 def gi_mubuf_addr64 :
     GIComplexOperandMatcher<s64, "selectMUBUFAddr64">,
     GIComplexPatternEquiv<MUBUFAddr64>;
@@ -107,6 +112,14 @@ def gi_mubuf_addr64_atomic :
 def gi_mubuf_offset_atomic :
     GIComplexOperandMatcher<s64, "selectMUBUFOffsetAtomic">,
     GIComplexPatternEquiv<MUBUFOffsetAtomic>;
+
+def gi_smrd_buffer_imm :
+    GIComplexOperandMatcher<s64, "selectSMRDBufferImm">,
+    GIComplexPatternEquiv<SMRDBufferImm>;
+
+def gi_smrd_buffer_imm32 :
+    GIComplexOperandMatcher<s64, "selectSMRDBufferImm32">,
+    GIComplexPatternEquiv<SMRDBufferImm32>;
 
 // Separate load nodes are defined to glue m0 initialization in
 // SelectionDAG. The GISel selector can just insert m0 initialization
@@ -125,6 +138,9 @@ def : GINodeEquiv<G_LOAD, AMDGPUatomic_ld_glue> {
   bit CheckMMOIsAtomic = 1;
 }
 
+def : GINodeEquiv<G_STORE, AMDGPUatomic_st_glue> {
+  bit CheckMMOIsAtomic = 1;
+}
 
 
 def : GINodeEquiv<G_ATOMIC_CMPXCHG, atomic_cmp_swap_glue>;
@@ -140,9 +156,15 @@ def : GINodeEquiv<G_ATOMICRMW_UMIN, atomic_load_umin_glue>;
 def : GINodeEquiv<G_ATOMICRMW_UMAX, atomic_load_umax_glue>;
 def : GINodeEquiv<G_ATOMICRMW_FADD, atomic_load_fadd_glue>;
 
-def : GINodeEquiv<G_AMDGPU_FFBH_U32, AMDGPUffbh_u32>;
+def : GINodeEquiv<G_AMDGPU_FFBH_U32, AMDGPUffbh_u32_impl>;
 def : GINodeEquiv<G_AMDGPU_FMIN_LEGACY, AMDGPUfmin_legacy>;
 def : GINodeEquiv<G_AMDGPU_FMAX_LEGACY, AMDGPUfmax_legacy>;
+def : GINodeEquiv<G_AMDGPU_RCP_IFLAG, AMDGPUrcp_iflag>;
+
+def : GINodeEquiv<G_AMDGPU_CVT_F32_UBYTE0, AMDGPUcvt_f32_ubyte0>;
+def : GINodeEquiv<G_AMDGPU_CVT_F32_UBYTE1, AMDGPUcvt_f32_ubyte1>;
+def : GINodeEquiv<G_AMDGPU_CVT_F32_UBYTE2, AMDGPUcvt_f32_ubyte2>;
+def : GINodeEquiv<G_AMDGPU_CVT_F32_UBYTE3, AMDGPUcvt_f32_ubyte3>;
 
 def : GINodeEquiv<G_AMDGPU_ATOMIC_CMPXCHG, AMDGPUatomic_cmp_swap>;
 def : GINodeEquiv<G_AMDGPU_BUFFER_LOAD, SIbuffer_load>;
@@ -167,6 +189,11 @@ def : GINodeEquiv<G_AMDGPU_ATOMIC_INC, SIatomic_inc>;
 def : GINodeEquiv<G_AMDGPU_ATOMIC_DEC, SIatomic_dec>;
 def : GINodeEquiv<G_AMDGPU_ATOMIC_INC, atomic_inc_glue>;
 def : GINodeEquiv<G_AMDGPU_ATOMIC_DEC, atomic_dec_glue>;
+def : GINodeEquiv<G_AMDGPU_ATOMIC_FMIN, SIatomic_fmin>;
+def : GINodeEquiv<G_AMDGPU_ATOMIC_FMAX, SIatomic_fmax>;
+def : GINodeEquiv<G_AMDGPU_ATOMIC_FMIN, atomic_load_fmin_glue>;
+def : GINodeEquiv<G_AMDGPU_ATOMIC_FMAX, atomic_load_fmax_glue>;
+
 
 def : GINodeEquiv<G_AMDGPU_BUFFER_ATOMIC_SWAP, SIbuffer_atomic_swap>;
 def : GINodeEquiv<G_AMDGPU_BUFFER_ATOMIC_ADD, SIbuffer_atomic_add>;
@@ -180,7 +207,9 @@ def : GINodeEquiv<G_AMDGPU_BUFFER_ATOMIC_OR, SIbuffer_atomic_or>;
 def : GINodeEquiv<G_AMDGPU_BUFFER_ATOMIC_XOR, SIbuffer_atomic_xor>;
 def : GINodeEquiv<G_AMDGPU_BUFFER_ATOMIC_INC, SIbuffer_atomic_inc>;
 def : GINodeEquiv<G_AMDGPU_BUFFER_ATOMIC_DEC, SIbuffer_atomic_dec>;
+def : GINodeEquiv<G_AMDGPU_BUFFER_ATOMIC_FADD, SIbuffer_atomic_fadd>;
 def : GINodeEquiv<G_AMDGPU_BUFFER_ATOMIC_CMPSWAP, SIbuffer_atomic_cmpswap>;
+def : GINodeEquiv<G_AMDGPU_S_BUFFER_LOAD, SIsbuffer_load>;
 
 class GISelSop2Pat <
   SDPatternOperator node,
@@ -250,7 +279,7 @@ multiclass GISelVop2IntrPat <
 
   def : GISelVop2Pat <node, inst, dst_vt, src_vt>;
 
-  // FIXME: Intrinsics aren't marked as commutable, so we need to add an explcit
+  // FIXME: Intrinsics aren't marked as commutable, so we need to add an explicit
   // pattern to handle commuting.  This is another reason why legalizing to a
   // generic machine instruction may be better that matching the intrinsic
   // directly.
@@ -297,3 +326,6 @@ def gi_extract_dlc : GICustomOperandRenderer<"renderExtractDLC">,
 
 def gi_extract_swz : GICustomOperandRenderer<"renderExtractSWZ">,
   GISDNodeXFormEquiv<extract_swz>;
+
+def gi_frameindex_to_targetframeindex : GICustomOperandRenderer<"renderFrameIndex">,
+  GISDNodeXFormEquiv<frameindex_to_targetframeindex>;

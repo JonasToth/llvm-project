@@ -24,6 +24,8 @@ void HexagonTargetInfo::getTargetDefines(const LangOptions &Opts,
   Builder.defineMacro("__qdsp6__", "1");
   Builder.defineMacro("__hexagon__", "1");
 
+  Builder.defineMacro("__ELF__");
+
   // The macro __HVXDBL__ is deprecated.
   bool DefineHvxDbl = false;
 
@@ -96,7 +98,8 @@ bool HexagonTargetInfo::initFeatureMap(
   StringRef CPUFeature = CPU;
   CPUFeature.consume_front("hexagon");
   CPUFeature.consume_back("t");
-  Features[CPUFeature] = true;
+  if (!CPUFeature.empty())
+    Features[CPUFeature] = true;
 
   Features["long-calls"] = false;
 

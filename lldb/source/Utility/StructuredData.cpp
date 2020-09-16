@@ -21,7 +21,8 @@ static StructuredData::ObjectSP ParseJSONValue(json::Value &value);
 static StructuredData::ObjectSP ParseJSONObject(json::Object *object);
 static StructuredData::ObjectSP ParseJSONArray(json::Array *array);
 
-StructuredData::ObjectSP StructuredData::ParseJSON(std::string json_text) {
+StructuredData::ObjectSP
+StructuredData::ParseJSON(const std::string &json_text) {
   llvm::Expected<json::Value> value = json::parse(json_text);
   if (!value) {
     llvm::consumeError(value.takeError());
@@ -156,7 +157,7 @@ void StructuredData::String::Serialize(json::OStream &s) const {
 void StructuredData::Dictionary::Serialize(json::OStream &s) const {
   s.objectBegin();
   for (const auto &pair : m_dict) {
-    s.attributeBegin(pair.first.AsCString());
+    s.attributeBegin(pair.first.GetStringRef());
     pair.second->Serialize(s);
     s.attributeEnd();
   }

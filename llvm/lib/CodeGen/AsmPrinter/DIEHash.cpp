@@ -17,10 +17,8 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/CodeGen/AsmPrinter.h"
-#include "llvm/CodeGen/DIE.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Endian.h"
-#include "llvm/Support/MD5.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -224,8 +222,9 @@ void DIEHash::hashLocList(const DIELocList &LocList) {
   HashingByteStreamer Streamer(*this);
   DwarfDebug &DD = *AP->getDwarfDebug();
   const DebugLocStream &Locs = DD.getDebugLocs();
-  for (const auto &Entry : Locs.getEntries(Locs.getList(LocList.getValue())))
-    DD.emitDebugLocEntry(Streamer, Entry, nullptr);
+  const DebugLocStream::List &List = Locs.getList(LocList.getValue());
+  for (const DebugLocStream::Entry &Entry : Locs.getEntries(List))
+    DD.emitDebugLocEntry(Streamer, Entry, List.CU);
 }
 
 // Hash an individual attribute \param Attr based on the type of attribute and

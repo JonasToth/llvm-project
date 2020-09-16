@@ -28,7 +28,7 @@ namespace orc {
 class IRTransformLayer : public IRLayer {
 public:
   using TransformFunction = std::function<Expected<ThreadSafeModule>(
-      ThreadSafeModule, const MaterializationResponsibility &R)>;
+      ThreadSafeModule, MaterializationResponsibility &R)>;
 
   IRTransformLayer(ExecutionSession &ES, IRLayer &BaseLayer,
                    TransformFunction Transform = identityTransform);
@@ -37,11 +37,11 @@ public:
     this->Transform = std::move(Transform);
   }
 
-  void emit(MaterializationResponsibility R, ThreadSafeModule TSM) override;
+  void emit(std::unique_ptr<MaterializationResponsibility> R,
+            ThreadSafeModule TSM) override;
 
-  static ThreadSafeModule
-  identityTransform(ThreadSafeModule TSM,
-                    const MaterializationResponsibility &R) {
+  static ThreadSafeModule identityTransform(ThreadSafeModule TSM,
+                                            MaterializationResponsibility &R) {
     return TSM;
   }
 

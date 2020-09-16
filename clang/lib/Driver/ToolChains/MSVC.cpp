@@ -66,6 +66,20 @@ using namespace llvm::opt;
 static bool getSystemRegistryString(const char *keyPath, const char *valueName,
                                     std::string &value, std::string *phValue);
 
+// Check command line arguments to try and find a toolchain.
+static bool
+findVCToolChainViaCommandLine(const ArgList &Args, std::string &Path,
+                              MSVCToolChain::ToolsetLayout &VSLayout) {
+  // Don't validate the input; trust the value supplied by the user.
+  // The primary motivation is to prevent unnecessary file and registry access.
+  if (Arg *A = Args.getLastArg(options::OPT__SLASH_vctoolsdir)) {
+    Path = A->getValue();
+    VSLayout = MSVCToolChain::ToolsetLayout::VS2017OrNewer;
+    return true;
+  }
+  return false;
+}
+
 // Check various environment variables to try and find a toolchain.
 static bool findVCToolChainViaEnvironment(std::string &Path,
                                           MSVCToolChain::ToolsetLayout &VSLayout) {
@@ -350,6 +364,16 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
           Args.MakeArgString(std::string("-libpath:") + WindowsSdkLibPath));
   }
 
+  // Add the compiler-rt library directories to libpath if they exist to help
+  // the linker find the various sanitizer, builtin, and profiling runtimes.
+  for (const auto &LibPath : TC.getLibraryPaths()) {
+    if (TC.getVFS().exists(LibPath))
+      CmdArgs.push_back(Args.MakeArgString("-libpath:" + LibPath));
+  }
+  auto CRTPath = TC.getCompilerRTPath();
+  if (TC.getVFS().exists(CRTPath))
+    CmdArgs.push_back(Args.MakeArgString("-libpath:" + CRTPath));
+
   if (!C.getDriver().IsCLMode() && Args.hasArg(options::OPT_L))
     for (const auto &LibPath : Args.getAllArgValues(options::OPT_L))
       CmdArgs.push_back(Args.MakeArgString("-libpath:" + LibPath));
@@ -582,8 +606,9 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     linkPath = TC.GetProgramPath(Linker.str().c_str());
   }
 
-  auto LinkCmd = std::make_unique<Command>(
-      JA, *this, Args.MakeArgString(linkPath), CmdArgs, Inputs);
+  auto LinkCmd =
+      std::make_unique<Command>(JA, *this, ResponseFileSupport::AtFileUTF16(),
+                                Args.MakeArgString(linkPath), CmdArgs, Inputs);
   if (!Environment.empty())
     LinkCmd->setEnvironment(Environment);
   C.addCommand(std::move(LinkCmd));
@@ -723,22 +748,25 @@ std::unique_ptr<Command> visualstudio::Compiler::GetCommand(
   CmdArgs.push_back(Fo);
 
   std::string Exec = FindVisualStudioExecutable(getToolChain(), "cl.exe");
-  return std::make_unique<Command>(JA, *this, Args.MakeArgString(Exec),
-                                    CmdArgs, Inputs);
+  return std::make_unique<Command>(JA, *this,
+                                   ResponseFileSupport::AtFileUTF16(),
+                                   Args.MakeArgString(Exec), CmdArgs, Inputs);
 }
 
 MSVCToolChain::MSVCToolChain(const Driver &D, const llvm::Triple &Triple,
                              const ArgList &Args)
-    : ToolChain(D, Triple, Args), CudaInstallation(D, Triple, Args) {
+    : ToolChain(D, Triple, Args), CudaInstallation(D, Triple, Args),
+      RocmInstallation(D, Triple, Args) {
   getProgramPaths().push_back(getDriver().getInstalledDir());
   if (getDriver().getInstalledDir() != getDriver().Dir)
     getProgramPaths().push_back(getDriver().Dir);
 
-  // Check the environment first, since that's probably the user telling us
-  // what they want to use.
-  // Failing that, just try to find the newest Visual Studio version we can
-  // and use its default VC toolchain.
-  findVCToolChainViaEnvironment(VCToolChainPath, VSLayout) ||
+  // Check the command line first, that's the user explicitly telling us what to
+  // use. Check the environment next, in case we're being invoked from a VS
+  // command prompt. Failing that, just try to find the newest Visual Studio
+  // version we can and use its default VC toolchain.
+  findVCToolChainViaCommandLine(Args, VCToolChainPath, VSLayout) ||
+      findVCToolChainViaEnvironment(VCToolChainPath, VSLayout) ||
       findVCToolChainViaSetupConfig(VCToolChainPath, VSLayout) ||
       findVCToolChainViaRegistry(VCToolChainPath, VSLayout);
 }
@@ -787,8 +815,14 @@ void MSVCToolChain::AddCudaIncludeArgs(const ArgList &DriverArgs,
   CudaInstallation.AddCudaIncludeArgs(DriverArgs, CC1Args);
 }
 
+void MSVCToolChain::AddHIPIncludeArgs(const ArgList &DriverArgs,
+                                      ArgStringList &CC1Args) const {
+  RocmInstallation.AddHIPIncludeArgs(DriverArgs, CC1Args);
+}
+
 void MSVCToolChain::printVerboseInfo(raw_ostream &OS) const {
   CudaInstallation.print(OS);
+  RocmInstallation.print(OS);
 }
 
 // Windows SDKs and VC Toolchains group their contents into subdirectories based
@@ -1244,15 +1278,18 @@ void MSVCToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
     return;
 
   // Honor %INCLUDE%. It should know essential search paths with vcvarsall.bat.
-  if (llvm::Optional<std::string> cl_include_dir =
-          llvm::sys::Process::GetEnv("INCLUDE")) {
-    SmallVector<StringRef, 8> Dirs;
-    StringRef(*cl_include_dir)
-        .split(Dirs, ";", /*MaxSplit=*/-1, /*KeepEmpty=*/false);
-    for (StringRef Dir : Dirs)
-      addSystemInclude(DriverArgs, CC1Args, Dir);
-    if (!Dirs.empty())
-      return;
+  // Skip if the user expressly set a vctoolsdir
+  if (!DriverArgs.getLastArg(options::OPT__SLASH_vctoolsdir)) {
+    if (llvm::Optional<std::string> cl_include_dir =
+            llvm::sys::Process::GetEnv("INCLUDE")) {
+      SmallVector<StringRef, 8> Dirs;
+      StringRef(*cl_include_dir)
+          .split(Dirs, ";", /*MaxSplit=*/-1, /*KeepEmpty=*/false);
+      for (StringRef Dir : Dirs)
+        addSystemInclude(DriverArgs, CC1Args, Dir);
+      if (!Dirs.empty())
+        return;
+    }
   }
 
   // When built with access to the proper Windows APIs, try to actually find
@@ -1483,7 +1520,8 @@ static void TranslateDArg(Arg *A, llvm::opt::DerivedArgList &DAL,
 
 llvm::opt::DerivedArgList *
 MSVCToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
-                             StringRef BoundArch, Action::OffloadKind) const {
+                             StringRef BoundArch,
+                             Action::OffloadKind OFK) const {
   DerivedArgList *DAL = new DerivedArgList(Args.getBaseArgs());
   const OptTable &Opts = getDriver().getOpts();
 
@@ -1522,7 +1560,8 @@ MSVCToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
     } else if (A->getOption().matches(options::OPT_D)) {
       // Translate -Dfoo#bar into -Dfoo=bar.
       TranslateDArg(A, *DAL, Opts);
-    } else {
+    } else if (OFK != Action::OFK_HIP) {
+      // HIP Toolchain translates input args by itself.
       DAL->append(A);
     }
   }

@@ -14,6 +14,7 @@
 #define NVVMIR_OPS
 
 include "mlir/Dialect/LLVMIR/LLVMOpBase.td"
+include "mlir/Interfaces/SideEffectInterfaces.td"
 
 //===----------------------------------------------------------------------===//
 // NVVM dialect definitions
@@ -21,7 +22,8 @@ include "mlir/Dialect/LLVMIR/LLVMOpBase.td"
 
 def NVVM_Dialect : Dialect {
   let name = "nvvm";
-  let cppNamespace = "NVVM";
+  let cppNamespace = "::mlir::NVVM";
+  let dependentDialects = ["LLVM::LLVMDialect"];
 }
 
 //===----------------------------------------------------------------------===//
@@ -33,15 +35,24 @@ class NVVM_Op<string mnemonic, list<OpTrait> traits = []> :
 }
 
 //===----------------------------------------------------------------------===//
+// NVVM intrinsic operations
+//===----------------------------------------------------------------------===//
+
+class NVVM_IntrOp<string mnem, list<int> overloadedResults,
+                  list<int> overloadedOperands, list<OpTrait> traits,
+                  bit hasResult>
+  : LLVM_IntrOpBase<NVVM_Dialect, mnem, "nvvm_" # !subst(".", "_", mnem),
+                    overloadedResults, overloadedOperands, traits, hasResult>;
+
+
+//===----------------------------------------------------------------------===//
 // NVVM special register op definitions
 //===----------------------------------------------------------------------===//
 
 class NVVM_SpecialRegisterOp<string mnemonic,
     list<OpTrait> traits = []> :
-  NVVM_Op<mnemonic, !listconcat(traits, [NoSideEffect])>,
-  Results<(outs LLVM_Type:$res)>, Arguments<(ins)> {
-  string llvmBuilder = "$res = createIntrinsicCall(builder,"
-    # "llvm::Intrinsic::nvvm_" # !subst(".","_", mnemonic) # ");";
+  NVVM_IntrOp<mnemonic, [], [], !listconcat(traits, [NoSideEffect]), 1>,
+  Arguments<(ins)> {
   let assemblyFormat = "attr-dict `:` type($res)";
 }
 
@@ -102,7 +113,8 @@ def NVVM_ShflBflyOp :
     if (!type.isStructTy() || type.getStructNumElements() != 2 ||
         !type.getStructElementType(1).isIntegerTy(
             /*Bitwidth=*/1))
-      return emitError("expected return type !llvm<\"{ ?, i1 }\">");
+      return emitError("expected return type to be a two-element struct with "
+                       "i1 as the second element");
     return success();
   }];
 }
@@ -125,7 +137,7 @@ def NVVM_MmaOp :
   Arguments<(ins Variadic<LLVM_Type>:$args)> {
   string llvmBuilder = [{
     $res = createIntrinsicCall(
-        builder, llvm::Intrinsic::nvvm_mma_m8n8k4_row_row_f32_f32, $args);
+        builder, llvm::Intrinsic::nvvm_mma_m8n8k4_row_col_f32_f32, $args);
   }];
   let assemblyFormat = "$args attr-dict `:` functional-type($args, $res)";
   let verifier = [{ return ::verify(*this); }];

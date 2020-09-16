@@ -14,23 +14,15 @@
 #ifndef MLIR_DIALECT_LLVMIR_NVVMDIALECT_H_
 #define MLIR_DIALECT_LLVMIR_NVVMDIALECT_H_
 
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/OpDefinition.h"
-namespace mlir {
-namespace NVVM {
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 
 ///// Ops /////
 #define GET_OP_CLASSES
 #include "mlir/Dialect/LLVMIR/NVVMOps.h.inc"
 
-class NVVMDialect : public Dialect {
-public:
-  explicit NVVMDialect(MLIRContext *context);
-
-  static StringRef getDialectNamespace() { return "nvvm"; }
-};
-
-} // namespace NVVM
-} // namespace mlir
+#include "mlir/Dialect/LLVMIR/NVVMOpsDialect.h.inc"
 
 #endif /* MLIR_DIALECT_LLVMIR_NVVMDIALECT_H_ */

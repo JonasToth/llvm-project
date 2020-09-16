@@ -33,6 +33,16 @@ const Builtin::Info WebAssemblyTargetInfo::BuiltinInfo[] = {
 static constexpr llvm::StringLiteral ValidCPUNames[] = {
     {"mvp"}, {"bleeding-edge"}, {"generic"}};
 
+StringRef WebAssemblyTargetInfo::getABI() const { return ABI; }
+
+bool WebAssemblyTargetInfo::setABI(const std::string &Name) {
+  if (Name != "mvp" && Name != "experimental-mv")
+    return false;
+
+  ABI = Name;
+  return true;
+}
+
 bool WebAssemblyTargetInfo::hasFeature(StringRef Feature) const {
   return llvm::StringSwitch<bool>(Feature)
       .Case("simd128", SIMDLevel >= SIMD128)
@@ -86,17 +96,41 @@ void WebAssemblyTargetInfo::getTargetDefines(const LangOptions &Opts,
 }
 
 void WebAssemblyTargetInfo::setSIMDLevel(llvm::StringMap<bool> &Features,
-                                         SIMDEnum Level) {
+                                         SIMDEnum Level, bool Enabled) {
+  if (Enabled) {
+    switch (Level) {
+    case UnimplementedSIMD128:
+      Features["unimplemented-simd128"] = true;
+      LLVM_FALLTHROUGH;
+    case SIMD128:
+      Features["simd128"] = true;
+      LLVM_FALLTHROUGH;
+    case NoSIMD:
+      break;
+    }
+    return;
+  }
+
   switch (Level) {
-  case UnimplementedSIMD128:
-    Features["unimplemented-simd128"] = true;
-    LLVM_FALLTHROUGH;
-  case SIMD128:
-    Features["simd128"] = true;
-    LLVM_FALLTHROUGH;
   case NoSIMD:
+  case SIMD128:
+    Features["simd128"] = false;
+    LLVM_FALLTHROUGH;
+  case UnimplementedSIMD128:
+    Features["unimplemented-simd128"] = false;
     break;
   }
+}
+
+void WebAssemblyTargetInfo::setFeatureEnabled(llvm::StringMap<bool> &Features,
+                                              StringRef Name,
+                                              bool Enabled) const {
+  if (Name == "simd128")
+    setSIMDLevel(Features, SIMD128, Enabled);
+  else if (Name == "unimplemented-simd128")
+    setSIMDLevel(Features, UnimplementedSIMD128, Enabled);
+  else
+    Features[Name] = Enabled;
 }
 
 bool WebAssemblyTargetInfo::initFeatureMap(
@@ -109,30 +143,8 @@ bool WebAssemblyTargetInfo::initFeatureMap(
     Features["atomics"] = true;
     Features["mutable-globals"] = true;
     Features["tail-call"] = true;
-    setSIMDLevel(Features, SIMD128);
+    setSIMDLevel(Features, SIMD128, true);
   }
-  // Other targets do not consider user-configured features here, but while we
-  // are actively developing new features it is useful to let user-configured
-  // features control availability of builtins
-  setSIMDLevel(Features, SIMDLevel);
-  if (HasNontrappingFPToInt)
-    Features["nontrapping-fptoint"] = true;
-  if (HasSignExt)
-    Features["sign-ext"] = true;
-  if (HasExceptionHandling)
-    Features["exception-handling"] = true;
-  if (HasBulkMemory)
-    Features["bulk-memory"] = true;
-  if (HasAtomics)
-    Features["atomics"] = true;
-  if (HasMutableGlobals)
-    Features["mutable-globals"] = true;
-  if (HasMultivalue)
-    Features["multivalue"] = true;
-  if (HasTailCall)
-    Features["tail-call"] = true;
-  if (HasReferenceTypes)
-    Features["reference-types"] = true;
 
   return TargetInfo::initFeatureMap(Features, Diags, CPU, FeaturesVec);
 }

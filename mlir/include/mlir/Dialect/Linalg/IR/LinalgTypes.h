@@ -12,26 +12,12 @@
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/Types.h"
 
+#include "mlir/Dialect/Linalg/IR/LinalgOpsDialect.h.inc"
+
 namespace mlir {
 class MLIRContext;
 
 namespace linalg {
-enum LinalgTypes {
-  Range = Type::FIRST_LINALG_TYPE,
-  LAST_USED_LINALG_TYPE = Range,
-};
-
-class LinalgDialect : public Dialect {
-public:
-  explicit LinalgDialect(MLIRContext *context);
-  static StringRef getDialectNamespace() { return "linalg"; }
-
-  /// Parse a type registered to this dialect.
-  Type parseType(DialectAsmParser &parser) const override;
-
-  /// Print a type registered to this dialect.
-  void printType(Type type, DialectAsmPrinter &os) const override;
-};
 
 /// A RangeType represents a minimal range abstraction (min, max, step).
 /// It is constructed by calling the linalg.range op with three values index of
@@ -42,17 +28,10 @@ public:
 ///      %0 = linalg.range %arg0:%arg1:%arg2 : !linalg.range
 ///    }
 /// ```
-class RangeType : public Type::TypeBase<RangeType, Type> {
+class RangeType : public Type::TypeBase<RangeType, Type, TypeStorage> {
 public:
   // Used for generic hooks in TypeBase.
   using Base::Base;
-  /// Construction hook.
-  static RangeType get(MLIRContext *context) {
-    /// Custom, uniq'ed construction in the MLIRContext.
-    return Base::get(context, LinalgTypes::Range);
-  }
-  /// Used to implement llvm-style cast.
-  static bool kindof(unsigned kind) { return kind == LinalgTypes::Range; }
 };
 
 } // namespace linalg

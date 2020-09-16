@@ -7,8 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_LanguageRuntime_h_
-#define liblldb_LanguageRuntime_h_
+#ifndef LLDB_TARGET_LANGUAGERUNTIME_H
+#define LLDB_TARGET_LANGUAGERUNTIME_H
 
 #include "lldb/Breakpoint/BreakpointResolver.h"
 #include "lldb/Breakpoint/BreakpointResolverName.h"
@@ -18,6 +18,7 @@
 #include "lldb/Expression/LLVMUserExpression.h"
 #include "lldb/Symbol/DeclVendor.h"
 #include "lldb/Target/ExecutionContextScope.h"
+#include "lldb/Target/Runtime.h"
 #include "lldb/lldb-private.h"
 #include "lldb/lldb-public.h"
 
@@ -51,12 +52,12 @@ protected:
   LanguageRuntime *m_language_runtime;
   lldb::SearchFilterSP m_filter_sp;
 
-  lldb::SearchFilterSP DoCopyForBreakpoint(Breakpoint &breakpoint) override;
+  lldb::SearchFilterSP DoCreateCopy() override;
 
   void UpdateModuleListIfNeeded();
 };
 
-class LanguageRuntime : public PluginInterface {
+class LanguageRuntime : public Runtime, public PluginInterface {
 public:
   ~LanguageRuntime() override;
 
@@ -127,14 +128,11 @@ public:
     return lldb::ThreadSP();
   }
 
-  Process *GetProcess() { return m_process; }
-
-  Target &GetTargetRef() { return m_process->GetTarget(); }
-
   virtual DeclVendor *GetDeclVendor() { return nullptr; }
 
   virtual lldb::BreakpointResolverSP
-  CreateExceptionResolver(Breakpoint *bkpt, bool catch_bp, bool throw_bp) = 0;
+  CreateExceptionResolver(const lldb::BreakpointSP &bkpt,
+                          bool catch_bp, bool throw_bp) = 0;
 
   virtual lldb::SearchFilterSP CreateExceptionSearchFilter() {
     return m_process->GetTarget().GetSearchFilterForModule(nullptr);
@@ -152,13 +150,13 @@ public:
 
   /// Identify whether a name is a runtime value that should not be hidden by
   /// from the user interface.
-  virtual bool IsWhitelistedRuntimeValue(ConstString name) { return false; }
+  virtual bool IsAllowedRuntimeValue(ConstString name) { return false; }
 
   virtual llvm::Optional<CompilerType> GetRuntimeType(CompilerType base_type) {
     return llvm::None;
   }
 
-  virtual void ModulesDidLoad(const ModuleList &module_list) {}
+  virtual void ModulesDidLoad(const ModuleList &module_list) override {}
 
   // Called by ClangExpressionParser::PrepareForExecution to query for any
   // custom LLVM IR passes that need to be run before an expression is
@@ -178,15 +176,13 @@ public:
   static char ID;
 
 protected:
-  // Classes that inherit from LanguageRuntime can see and modify these
-
   LanguageRuntime(Process *process);
-  Process *m_process;
 
 private:
-  DISALLOW_COPY_AND_ASSIGN(LanguageRuntime);
+  LanguageRuntime(const LanguageRuntime &) = delete;
+  const LanguageRuntime &operator=(const LanguageRuntime &) = delete;
 };
 
 } // namespace lldb_private
 
-#endif // liblldb_LanguageRuntime_h_
+#endif // LLDB_TARGET_LANGUAGERUNTIME_H

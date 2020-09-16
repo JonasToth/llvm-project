@@ -1,4 +1,4 @@
-//===--------- Implementation of the base class for libc unittests --------===//
+//===-- Implementation of the base class for libc unittests ---------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -8,6 +8,8 @@
 
 #include "Test.h"
 
+#include "utils/testutils/ExecuteFunction.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -31,77 +33,92 @@ private:
 
 namespace internal {
 
+// When the value is of integral type, just display it as normal.
+template <typename ValType>
+cpp::EnableIfType<cpp::IsIntegral<ValType>::Value, std::string>
+describeValue(ValType Value) {
+  return std::to_string(Value);
+}
+
+std::string describeValue(llvm::StringRef Value) { return std::string(Value); }
+
+// When the value is __uint128_t, also show its hexadecimal digits.
+// Using template to force exact match, prevent ambiguous promotion.
+template <> std::string describeValue<__uint128_t>(__uint128_t Value) {
+  std::string S(sizeof(__uint128_t) * 2, '0');
+
+  for (auto I = S.rbegin(), End = S.rend(); I != End; ++I, Value >>= 4) {
+    unsigned char Mod = static_cast<unsigned char>(Value) & 15;
+    *I = llvm::hexdigit(Mod, true);
+  }
+
+  return "0x" + S;
+}
+
+template <typename ValType>
+void explainDifference(ValType LHS, ValType RHS, const char *LHSStr,
+                       const char *RHSStr, const char *File, unsigned long Line,
+                       llvm::StringRef OpString) {
+  size_t OffsetLength = OpString.size() > 2 ? OpString.size() - 2 : 0;
+  std::string Offset(OffsetLength, ' ');
+
+  llvm::outs() << File << ":" << Line << ": FAILURE\n"
+               << Offset << "Expected: " << LHSStr << '\n'
+               << Offset << "Which is: " << describeValue(LHS) << '\n'
+               << "To be " << OpString << ": " << RHSStr << '\n'
+               << Offset << "Which is: " << describeValue(RHS) << '\n';
+}
+
 template <typename ValType>
 bool test(RunContext &Ctx, TestCondition Cond, ValType LHS, ValType RHS,
           const char *LHSStr, const char *RHSStr, const char *File,
           unsigned long Line) {
+  auto ExplainDifference = [=](llvm::StringRef OpString) {
+    explainDifference(LHS, RHS, LHSStr, RHSStr, File, Line, OpString);
+  };
+
   switch (Cond) {
   case Cond_EQ:
     if (LHS == RHS)
       return true;
 
     Ctx.markFail();
-    llvm::outs() << File << ":" << Line << ": FAILURE\n"
-                 << "      Expected: " << LHSStr << '\n'
-                 << "      Which is: " << LHS << '\n'
-                 << "To be equal to: " << RHSStr << '\n'
-                 << "      Which is: " << RHS << '\n';
-
+    ExplainDifference("equal to");
     return false;
   case Cond_NE:
     if (LHS != RHS)
       return true;
 
     Ctx.markFail();
-    llvm::outs() << File << ":" << Line << ": FAILURE\n"
-                 << "          Expected: " << LHSStr << '\n'
-                 << "          Which is: " << LHS << '\n'
-                 << "To be not equal to: " << RHSStr << '\n'
-                 << "          Which is: " << RHS << '\n';
+    ExplainDifference("not equal to");
     return false;
   case Cond_LT:
     if (LHS < RHS)
       return true;
 
     Ctx.markFail();
-    llvm::outs() << File << ":" << Line << ": FAILURE\n"
-                 << "       Expected: " << LHSStr << '\n'
-                 << "       Which is: " << LHS << '\n'
-                 << "To be less than: " << RHSStr << '\n'
-                 << "       Which is: " << RHS << '\n';
+    ExplainDifference("less than");
     return false;
   case Cond_LE:
     if (LHS <= RHS)
       return true;
 
     Ctx.markFail();
-    llvm::outs() << File << ":" << Line << ": FAILURE\n"
-                 << "                   Expected: " << LHSStr << '\n'
-                 << "                   Which is: " << LHS << '\n'
-                 << "To be less than or equal to: " << RHSStr << '\n'
-                 << "                   Which is: " << RHS << '\n';
+    ExplainDifference("less than or equal to");
     return false;
   case Cond_GT:
     if (LHS > RHS)
       return true;
 
     Ctx.markFail();
-    llvm::outs() << File << ":" << Line << ": FAILURE\n"
-                 << "          Expected: " << LHSStr << '\n'
-                 << "          Which is: " << LHS << '\n'
-                 << "To be greater than: " << RHSStr << '\n'
-                 << "          Which is: " << RHS << '\n';
+    ExplainDifference("greater than");
     return false;
   case Cond_GE:
     if (LHS >= RHS)
       return true;
 
     Ctx.markFail();
-    llvm::outs() << File << ":" << Line << ": FAILURE\n"
-                 << "                      Expected: " << LHSStr << '\n'
-                 << "                      Which is: " << LHS << '\n'
-                 << "To be greater than or equal to: " << RHSStr << '\n'
-                 << "                      Which is: " << RHS << '\n';
+    ExplainDifference("greater than or equal to");
     return false;
   default:
     Ctx.markFail();
@@ -131,7 +148,10 @@ int Test::runTests() {
   int FailCount = 0;
   for (Test *T = Start; T != nullptr; T = T->Next, ++TestCount) {
     const char *TestName = T->getName();
-    llvm::outs() << "[ RUN      ] " << TestName << '\n';
+    constexpr auto GREEN = llvm::raw_ostream::GREEN;
+    constexpr auto RED = llvm::raw_ostream::RED;
+    constexpr auto RESET = llvm::raw_ostream::RESET;
+    llvm::outs() << GREEN << "[ RUN      ] " << RESET << TestName << '\n';
     RunContext Ctx;
     T->SetUp();
     T->Run(Ctx);
@@ -139,11 +159,11 @@ int Test::runTests() {
     auto Result = Ctx.status();
     switch (Result) {
     case RunContext::Result_Fail:
-      llvm::outs() << "[  FAILED  ] " << TestName << '\n';
+      llvm::outs() << RED << "[  FAILED  ] " << RESET << TestName << '\n';
       ++FailCount;
       break;
     case RunContext::Result_Pass:
-      llvm::outs() << "[       OK ] " << TestName << '\n';
+      llvm::outs() << GREEN << "[       OK ] " << RESET << TestName << '\n';
       break;
     }
   }
@@ -214,6 +234,11 @@ template bool Test::test<unsigned long long, 0>(
     unsigned long long RHS, const char *LHSStr, const char *RHSStr,
     const char *File, unsigned long Line);
 
+template bool Test::test<__uint128_t, 0>(RunContext &Ctx, TestCondition Cond,
+                                         __uint128_t LHS, __uint128_t RHS,
+                                         const char *LHSStr, const char *RHSStr,
+                                         const char *File, unsigned long Line);
+
 bool Test::testStrEq(RunContext &Ctx, const char *LHS, const char *RHS,
                      const char *LHSStr, const char *RHSStr, const char *File,
                      unsigned long Line) {
@@ -226,6 +251,105 @@ bool Test::testStrNe(RunContext &Ctx, const char *LHS, const char *RHS,
                      unsigned long Line) {
   return internal::test(Ctx, Cond_NE, llvm::StringRef(LHS),
                         llvm::StringRef(RHS), LHSStr, RHSStr, File, Line);
+}
+
+bool Test::testMatch(RunContext &Ctx, bool MatchResult, MatcherBase &Matcher,
+                     const char *LHSStr, const char *RHSStr, const char *File,
+                     unsigned long Line) {
+  if (MatchResult)
+    return true;
+
+  Ctx.markFail();
+  llvm::outs() << File << ":" << Line << ": FAILURE\n"
+               << "Failed to match " << LHSStr << " against " << RHSStr
+               << ".\n";
+  testutils::StreamWrapper OutsWrapper = testutils::outs();
+  Matcher.explainError(OutsWrapper);
+  return false;
+}
+
+bool Test::testProcessKilled(RunContext &Ctx, testutils::FunctionCaller *Func,
+                             int Signal, const char *LHSStr, const char *RHSStr,
+                             const char *File, unsigned long Line) {
+  testutils::ProcessStatus Result = testutils::invokeInSubprocess(Func, 500);
+
+  if (const char *error = Result.getError()) {
+    Ctx.markFail();
+    llvm::outs() << File << ":" << Line << ": FAILURE\n" << error << '\n';
+    return false;
+  }
+
+  if (Result.timedOut()) {
+    Ctx.markFail();
+    llvm::outs() << File << ":" << Line << ": FAILURE\n"
+                 << "Process timed out after " << 500 << " milliseconds.\n";
+    return false;
+  }
+
+  if (Result.exitedNormally()) {
+    Ctx.markFail();
+    llvm::outs() << File << ":" << Line << ": FAILURE\n"
+                 << "Expected " << LHSStr
+                 << " to be killed by a signal\nBut it exited normally!\n";
+    return false;
+  }
+
+  int KilledBy = Result.getFatalSignal();
+  assert(KilledBy != 0 && "Not killed by any signal");
+  if (Signal == -1 || KilledBy == Signal)
+    return true;
+
+  using testutils::signalAsString;
+  Ctx.markFail();
+  llvm::outs() << File << ":" << Line << ": FAILURE\n"
+               << "              Expected: " << LHSStr << '\n'
+               << "To be killed by signal: " << Signal << '\n'
+               << "              Which is: " << signalAsString(Signal) << '\n'
+               << "  But it was killed by: " << KilledBy << '\n'
+               << "              Which is: " << signalAsString(KilledBy)
+               << '\n';
+  return false;
+}
+
+bool Test::testProcessExits(RunContext &Ctx, testutils::FunctionCaller *Func,
+                            int ExitCode, const char *LHSStr,
+                            const char *RHSStr, const char *File,
+                            unsigned long Line) {
+  testutils::ProcessStatus Result = testutils::invokeInSubprocess(Func, 500);
+
+  if (const char *error = Result.getError()) {
+    Ctx.markFail();
+    llvm::outs() << File << ":" << Line << ": FAILURE\n" << error << '\n';
+    return false;
+  }
+
+  if (Result.timedOut()) {
+    Ctx.markFail();
+    llvm::outs() << File << ":" << Line << ": FAILURE\n"
+                 << "Process timed out after " << 500 << " milliseconds.\n";
+    return false;
+  }
+
+  if (!Result.exitedNormally()) {
+    Ctx.markFail();
+    llvm::outs() << File << ":" << Line << ": FAILURE\n"
+                 << "Expected " << LHSStr << '\n'
+                 << "to exit with exit code " << ExitCode << '\n'
+                 << "But it exited abnormally!\n";
+    return false;
+  }
+
+  int ActualExit = Result.getExitCode();
+  if (ActualExit == ExitCode)
+    return true;
+
+  Ctx.markFail();
+  llvm::outs() << File << ":" << Line << ": FAILURE\n"
+               << "Expected exit code of: " << LHSStr << '\n'
+               << "             Which is: " << ActualExit << '\n'
+               << "       To be equal to: " << RHSStr << '\n'
+               << "             Which is: " << ExitCode << '\n';
+  return false;
 }
 
 } // namespace testing

@@ -23,7 +23,6 @@
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/MemoryLocation.h"
-#include "llvm/Analysis/OrderedBasicBlock.h"
 #include "llvm/Analysis/PHITransAddr.h"
 #include "llvm/Analysis/PhiValues.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
@@ -167,6 +166,12 @@ static ModRefInfo GetLocation(const Instruction *Inst, MemoryLocation &Loc,
       // These intrinsics don't really modify the memory, but returning Mod
       // will allow them to be handled conservatively.
       return ModRefInfo::Mod;
+    case Intrinsic::masked_load:
+      Loc = MemoryLocation::getForArgument(II, 0, TLI);
+      return ModRefInfo::Ref;
+    case Intrinsic::masked_store:
+      Loc = MemoryLocation::getForArgument(II, 1, TLI);
+      return ModRefInfo::Mod;
     default:
       break;
     }
@@ -250,8 +255,7 @@ static bool isVolatile(Instruction *Inst) {
 
 MemDepResult MemoryDependenceResults::getPointerDependencyFrom(
     const MemoryLocation &MemLoc, bool isLoad, BasicBlock::iterator ScanIt,
-    BasicBlock *BB, Instruction *QueryInst, unsigned *Limit,
-    OrderedBasicBlock *OBB) {
+    BasicBlock *BB, Instruction *QueryInst, unsigned *Limit) {
   MemDepResult InvariantGroupDependency = MemDepResult::getUnknown();
   if (QueryInst != nullptr) {
     if (auto *LI = dyn_cast<LoadInst>(QueryInst)) {
@@ -262,7 +266,7 @@ MemDepResult MemoryDependenceResults::getPointerDependencyFrom(
     }
   }
   MemDepResult SimpleDep = getSimplePointerDependencyFrom(
-      MemLoc, isLoad, ScanIt, BB, QueryInst, Limit, OBB);
+      MemLoc, isLoad, ScanIt, BB, QueryInst, Limit);
   if (SimpleDep.isDef())
     return SimpleDep;
   // Non-local invariant group dependency indicates there is non local Def
@@ -363,8 +367,9 @@ MemoryDependenceResults::getInvariantGroupPointerDependency(LoadInst *LI,
 
 MemDepResult MemoryDependenceResults::getSimplePointerDependencyFrom(
     const MemoryLocation &MemLoc, bool isLoad, BasicBlock::iterator ScanIt,
-    BasicBlock *BB, Instruction *QueryInst, unsigned *Limit,
-    OrderedBasicBlock *OBB) {
+    BasicBlock *BB, Instruction *QueryInst, unsigned *Limit) {
+  // We can batch AA queries, because IR does not change during a MemDep query.
+  BatchAAResults BatchAA(AA);
   bool isInvariantLoad = false;
 
   unsigned DefaultLimit = getDefaultBlockScanLimit();
@@ -409,17 +414,6 @@ MemDepResult MemoryDependenceResults::getSimplePointerDependencyFrom(
       isInvariantLoad = true;
   }
 
-  const DataLayout &DL = BB->getModule()->getDataLayout();
-
-  // If the caller did not provide an ordered basic block,
-  // create one to lazily compute and cache instruction
-  // positions inside a BB. This is used to provide fast queries for relative
-  // position between two instructions in a BB and can be used by
-  // AliasAnalysis::callCapturesBefore.
-  OrderedBasicBlock OBBTmp(BB);
-  if (!OBB)
-    OBB = &OBBTmp;
-
   // Return "true" if and only if the instruction I is either a non-simple
   // load or a non-simple store.
   auto isNonSimpleLoadOrStore = [](Instruction *I) -> bool {
@@ -454,14 +448,29 @@ MemDepResult MemoryDependenceResults::getSimplePointerDependencyFrom(
     if (IntrinsicInst *II = dyn_cast<IntrinsicInst>(Inst)) {
       // If we reach a lifetime begin or end marker, then the query ends here
       // because the value is undefined.
-      if (II->getIntrinsicID() == Intrinsic::lifetime_start) {
+      Intrinsic::ID ID = II->getIntrinsicID();
+      switch (ID) {
+      case Intrinsic::lifetime_start:
         // FIXME: This only considers queries directly on the invariant-tagged
         // pointer, not on query pointers that are indexed off of them.  It'd
         // be nice to handle that at some point (the right approach is to use
         // GetPointerBaseWithConstantOffset).
-        if (AA.isMustAlias(MemoryLocation(II->getArgOperand(1)), MemLoc))
+        if (BatchAA.isMustAlias(MemoryLocation(II->getArgOperand(1)), MemLoc))
           return MemDepResult::getDef(II);
         continue;
+      case Intrinsic::masked_load:
+      case Intrinsic::masked_store: {
+        MemoryLocation Loc;
+        /*ModRefInfo MR =*/ GetLocation(II, Loc, TLI);
+        AliasResult R = BatchAA.alias(Loc, MemLoc);
+        if (R == NoAlias)
+          continue;
+        if (R == MustAlias)
+          return MemDepResult::getDef(II);
+        if (ID == Intrinsic::masked_load)
+          continue;
+        return MemDepResult::getClobber(II);
+      }
       }
     }
 
@@ -499,7 +508,7 @@ MemDepResult MemoryDependenceResults::getSimplePointerDependencyFrom(
       MemoryLocation LoadLoc = MemoryLocation::get(LI);
 
       // If we found a pointer, check if it could be the same as our pointer.
-      AliasResult R = AA.alias(LoadLoc, MemLoc);
+      AliasResult R = BatchAA.alias(LoadLoc, MemLoc);
 
       if (isLoad) {
         if (R == NoAlias)
@@ -530,7 +539,7 @@ MemDepResult MemoryDependenceResults::getSimplePointerDependencyFrom(
         continue;
 
       // Stores don't alias loads from read-only memory.
-      if (AA.pointsToConstantMemory(LoadLoc))
+      if (BatchAA.pointsToConstantMemory(LoadLoc))
         continue;
 
       // Stores depend on may/must aliased loads.
@@ -561,7 +570,7 @@ MemDepResult MemoryDependenceResults::getSimplePointerDependencyFrom(
       // If alias analysis can tell that this store is guaranteed to not modify
       // the query pointer, ignore it.  Use getModRefInfo to handle cases where
       // the query pointer points to constant memory etc.
-      if (!isModOrRefSet(AA.getModRefInfo(SI, MemLoc)))
+      if (!isModOrRefSet(BatchAA.getModRefInfo(SI, MemLoc)))
         continue;
 
       // Ok, this store might clobber the query pointer.  Check to see if it is
@@ -570,7 +579,7 @@ MemDepResult MemoryDependenceResults::getSimplePointerDependencyFrom(
       MemoryLocation StoreLoc = MemoryLocation::get(SI);
 
       // If we found a pointer, check if it could be the same as our pointer.
-      AliasResult R = AA.alias(StoreLoc, MemLoc);
+      AliasResult R = BatchAA.alias(StoreLoc, MemLoc);
 
       if (R == NoAlias)
         continue;
@@ -588,8 +597,8 @@ MemDepResult MemoryDependenceResults::getSimplePointerDependencyFrom(
     // looking for a clobber in many cases; that's an alias property and is
     // handled by BasicAA.
     if (isa<AllocaInst>(Inst) || isNoAliasFn(Inst, &TLI)) {
-      const Value *AccessPtr = GetUnderlyingObject(MemLoc.Ptr, DL);
-      if (AccessPtr == Inst || AA.isMustAlias(Inst, AccessPtr))
+      const Value *AccessPtr = getUnderlyingObject(MemLoc.Ptr);
+      if (AccessPtr == Inst || BatchAA.isMustAlias(Inst, AccessPtr))
         return MemDepResult::getDef(Inst);
     }
 
@@ -606,10 +615,11 @@ MemDepResult MemoryDependenceResults::getSimplePointerDependencyFrom(
         continue;
 
     // See if this instruction (e.g. a call or vaarg) mod/ref's the pointer.
-    ModRefInfo MR = AA.getModRefInfo(Inst, MemLoc);
+    ModRefInfo MR = BatchAA.getModRefInfo(Inst, MemLoc);
     // If necessary, perform additional analysis.
     if (isModAndRefSet(MR))
-      MR = AA.callCapturesBefore(Inst, MemLoc, &DT, OBB);
+      // TODO: Support callCapturesBefore() on BatchAAResults.
+      MR = AA.callCapturesBefore(Inst, MemLoc, &DT);
     switch (clearMust(MR)) {
     case ModRefInfo::NoModRef:
       // If the call has no effect on the queried pointer, just ignore it.
@@ -635,8 +645,7 @@ MemDepResult MemoryDependenceResults::getSimplePointerDependencyFrom(
   return MemDepResult::getNonFuncLocal();
 }
 
-MemDepResult MemoryDependenceResults::getDependency(Instruction *QueryInst,
-                                                    OrderedBasicBlock *OBB) {
+MemDepResult MemoryDependenceResults::getDependency(Instruction *QueryInst) {
   Instruction *ScanPos = QueryInst;
 
   // Check for a cached result
@@ -676,7 +685,7 @@ MemDepResult MemoryDependenceResults::getDependency(Instruction *QueryInst,
 
       LocalCache =
           getPointerDependencyFrom(MemLoc, isLoad, ScanPos->getIterator(),
-                                   QueryParent, QueryInst, nullptr, OBB);
+                                   QueryParent, QueryInst, nullptr);
     } else if (auto *QueryCall = dyn_cast<CallBase>(QueryInst)) {
       bool isReadOnly = AA.onlyReadsMemory(QueryCall);
       LocalCache = getCallDependencyFrom(QueryCall, isReadOnly,
@@ -902,6 +911,11 @@ MemDepResult MemoryDependenceResults::GetNonLocalInfoForBlock(
     Instruction *QueryInst, const MemoryLocation &Loc, bool isLoad,
     BasicBlock *BB, NonLocalDepInfo *Cache, unsigned NumSortedEntries) {
 
+  bool isInvariantLoad = false;
+
+  if (LoadInst *LI = dyn_cast_or_null<LoadInst>(QueryInst))
+    isInvariantLoad = LI->getMetadata(LLVMContext::MD_invariant_load);
+
   // Do a binary search to see if we already have an entry for this block in
   // the cache set.  If so, find it.
   NonLocalDepInfo::iterator Entry = std::upper_bound(
@@ -912,6 +926,13 @@ MemDepResult MemoryDependenceResults::GetNonLocalInfoForBlock(
   NonLocalDepEntry *ExistingResult = nullptr;
   if (Entry != Cache->begin() + NumSortedEntries && Entry->getBB() == BB)
     ExistingResult = &*Entry;
+
+  // Use cached result for invariant load only if there is no dependency for non
+  // invariant load. In this case invariant load can not have any dependency as
+  // well.
+  if (ExistingResult && isInvariantLoad &&
+      !ExistingResult->getResult().isNonFuncLocal())
+    ExistingResult = nullptr;
 
   // If we have a cached entry, and it is non-dirty, use it as the value for
   // this dependency.
@@ -940,6 +961,10 @@ MemDepResult MemoryDependenceResults::GetNonLocalInfoForBlock(
   // Scan the block for the dependency.
   MemDepResult Dep =
       getPointerDependencyFrom(Loc, isLoad, ScanPos, BB, QueryInst);
+
+  // Don't cache results for invariant load.
+  if (isInvariantLoad)
+    return Dep;
 
   // If we had a dirty entry for the block, update it.  Otherwise, just add
   // a new entry.
@@ -1017,7 +1042,8 @@ bool MemoryDependenceResults::getNonLocalPointerDepFromBB(
     Instruction *QueryInst, const PHITransAddr &Pointer,
     const MemoryLocation &Loc, bool isLoad, BasicBlock *StartBB,
     SmallVectorImpl<NonLocalDepResult> &Result,
-    DenseMap<BasicBlock *, Value *> &Visited, bool SkipFirstBlock) {
+    DenseMap<BasicBlock *, Value *> &Visited, bool SkipFirstBlock,
+    bool IsIncomplete) {
   // Look up the cached info for Pointer.
   ValueIsLoadPair CacheKey(Pointer.getAddr(), isLoad);
 
@@ -1029,6 +1055,10 @@ bool MemoryDependenceResults::getNonLocalPointerDepFromBB(
   InitialNLPI.Size = Loc.Size;
   InitialNLPI.AATags = Loc.AATags;
 
+  bool isInvariantLoad = false;
+  if (LoadInst *LI = dyn_cast_or_null<LoadInst>(QueryInst))
+    isInvariantLoad = LI->getMetadata(LLVMContext::MD_invariant_load);
+
   // Get the NLPI for CacheKey, inserting one into the map if it doesn't
   // already have one.
   std::pair<CachedNonLocalPointerInfo::iterator, bool> Pair =
@@ -1037,7 +1067,8 @@ bool MemoryDependenceResults::getNonLocalPointerDepFromBB(
 
   // If we already have a cache entry for this CacheKey, we may need to do some
   // work to reconcile the cache entry and the current query.
-  if (!Pair.second) {
+  // Invariant loads don't participate in caching. Thus no need to reconcile.
+  if (!isInvariantLoad && !Pair.second) {
     if (CacheInfo->Size != Loc.Size) {
       bool ThrowOutEverything;
       if (CacheInfo->Size.hasValue() && Loc.Size.hasValue()) {
@@ -1061,12 +1092,16 @@ bool MemoryDependenceResults::getNonLocalPointerDepFromBB(
           if (Instruction *Inst = Entry.getResult().getInst())
             RemoveFromReverseMap(ReverseNonLocalPtrDeps, Inst, CacheKey);
         CacheInfo->NonLocalDeps.clear();
+        // The cache is cleared (in the above line) so we will have lost
+        // information about blocks we have already visited. We therefore must
+        // assume that the cache information is incomplete.
+        IsIncomplete = true;
       } else {
         // This query's Size is less than the cached one. Conservatively restart
         // the query using the greater size.
         return getNonLocalPointerDepFromBB(
             QueryInst, Pointer, Loc.getWithNewSize(CacheInfo->Size), isLoad,
-            StartBB, Result, Visited, SkipFirstBlock);
+            StartBB, Result, Visited, SkipFirstBlock, IsIncomplete);
       }
     }
 
@@ -1081,11 +1116,15 @@ bool MemoryDependenceResults::getNonLocalPointerDepFromBB(
           if (Instruction *Inst = Entry.getResult().getInst())
             RemoveFromReverseMap(ReverseNonLocalPtrDeps, Inst, CacheKey);
         CacheInfo->NonLocalDeps.clear();
+        // The cache is cleared (in the above line) so we will have lost
+        // information about blocks we have already visited. We therefore must
+        // assume that the cache information is incomplete.
+        IsIncomplete = true;
       }
       if (Loc.AATags)
         return getNonLocalPointerDepFromBB(
             QueryInst, Pointer, Loc.getWithoutAATags(), isLoad, StartBB, Result,
-            Visited, SkipFirstBlock);
+            Visited, SkipFirstBlock, IsIncomplete);
     }
   }
 
@@ -1093,7 +1132,13 @@ bool MemoryDependenceResults::getNonLocalPointerDepFromBB(
 
   // If we have valid cached information for exactly the block we are
   // investigating, just return it with no recomputation.
-  if (CacheInfo->Pair == BBSkipFirstBlockPair(StartBB, SkipFirstBlock)) {
+  // Don't use cached information for invariant loads since it is valid for
+  // non-invariant loads only.
+  //
+  // Don't use cached information for invariant loads since it is valid for
+  // non-invariant loads only.
+  if (!IsIncomplete && !isInvariantLoad &&
+      CacheInfo->Pair == BBSkipFirstBlockPair(StartBB, SkipFirstBlock)) {
     // We have a fully cached result for this query then we can just return the
     // cached results and populate the visited set.  However, we have to verify
     // that we don't already have conflicting results for these blocks.  Check
@@ -1130,13 +1175,18 @@ bool MemoryDependenceResults::getNonLocalPointerDepFromBB(
   }
 
   // Otherwise, either this is a new block, a block with an invalid cache
-  // pointer or one that we're about to invalidate by putting more info into it
-  // than its valid cache info.  If empty, the result will be valid cache info,
-  // otherwise it isn't.
-  if (Cache->empty())
-    CacheInfo->Pair = BBSkipFirstBlockPair(StartBB, SkipFirstBlock);
-  else
-    CacheInfo->Pair = BBSkipFirstBlockPair();
+  // pointer or one that we're about to invalidate by putting more info into
+  // it than its valid cache info.  If empty and not explicitly indicated as
+  // incomplete, the result will be valid cache info, otherwise it isn't.
+  //
+  // Invariant loads don't affect cache in any way thus no need to update
+  // CacheInfo as well.
+  if (!isInvariantLoad) {
+    if (!IsIncomplete && Cache->empty())
+      CacheInfo->Pair = BBSkipFirstBlockPair(StartBB, SkipFirstBlock);
+    else
+      CacheInfo->Pair = BBSkipFirstBlockPair();
+  }
 
   SmallVector<BasicBlock *, 32> Worklist;
   Worklist.push_back(StartBB);
@@ -1377,22 +1427,27 @@ bool MemoryDependenceResults::getNonLocalPointerDepFromBB(
     if (SkipFirstBlock)
       return false;
 
-    bool foundBlock = false;
-    for (NonLocalDepEntry &I : llvm::reverse(*Cache)) {
-      if (I.getBB() != BB)
-        continue;
+    // Results of invariant loads are not cached thus no need to update cached
+    // information.
+    if (!isInvariantLoad) {
+      for (NonLocalDepEntry &I : llvm::reverse(*Cache)) {
+        if (I.getBB() != BB)
+          continue;
 
-      assert((GotWorklistLimit || I.getResult().isNonLocal() ||
-              !DT.isReachableFromEntry(BB)) &&
-             "Should only be here with transparent block");
-      foundBlock = true;
-      I.setResult(MemDepResult::getUnknown());
-      Result.push_back(
-          NonLocalDepResult(I.getBB(), I.getResult(), Pointer.getAddr()));
-      break;
+        assert((GotWorklistLimit || I.getResult().isNonLocal() ||
+                !DT.isReachableFromEntry(BB)) &&
+               "Should only be here with transparent block");
+
+        I.setResult(MemDepResult::getUnknown());
+
+
+        break;
+      }
     }
-    (void)foundBlock; (void)GotWorklistLimit;
-    assert((foundBlock || GotWorklistLimit) && "Current block not in cache?");
+    (void)GotWorklistLimit;
+    // Go ahead and report unknown dependence.
+    Result.push_back(
+        NonLocalDepResult(BB, MemDepResult::getUnknown(), Pointer.getAddr()));
   }
 
   // Okay, we're done now.  If we added new values to the cache, re-sort it.
@@ -1485,15 +1540,25 @@ void MemoryDependenceResults::removeInstruction(Instruction *RemInst) {
     LocalDeps.erase(LocalDepEntry);
   }
 
-  // If we have any cached pointer dependencies on this instruction, remove
-  // them.  If the instruction has non-pointer type, then it can't be a pointer
-  // base.
+  // If we have any cached dependencies on this instruction, remove
+  // them.
 
-  // Remove it from both the load info and the store info.  The instruction
-  // can't be in either of these maps if it is non-pointer.
+  // If the instruction is a pointer, remove it from both the load info and the
+  // store info.
   if (RemInst->getType()->isPointerTy()) {
     RemoveCachedNonLocalPointerDependencies(ValueIsLoadPair(RemInst, false));
     RemoveCachedNonLocalPointerDependencies(ValueIsLoadPair(RemInst, true));
+  } else {
+    // Otherwise, if the instructions is in the map directly, it must be a load.
+    // Remove it.
+    auto toRemoveIt = NonLocalDefsCache.find(RemInst);
+    if (toRemoveIt != NonLocalDefsCache.end()) {
+      assert(isa<LoadInst>(RemInst) &&
+             "only load instructions should be added directly");
+      const Instruction *DepV = toRemoveIt->second.getResult().getInst();
+      ReverseNonLocalDefsCache.find(DepV)->second.erase(RemInst);
+      NonLocalDefsCache.erase(toRemoveIt);
+    }
   }
 
   // Loop over all of the things that depend on the instruction we're removing.

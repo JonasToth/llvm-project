@@ -255,8 +255,8 @@ int RegAllocFast::getStackSpaceFor(Register VirtReg) {
   // Allocate a new stack object for this spill location...
   const TargetRegisterClass &RC = *MRI->getRegClass(VirtReg);
   unsigned Size = TRI->getSpillSize(RC);
-  unsigned Align = TRI->getSpillAlignment(RC);
-  int FrameIdx = MFI->CreateSpillStackObject(Size, Align);
+  Align Alignment = TRI->getSpillAlign(RC);
+  int FrameIdx = MFI->CreateSpillStackObject(Size, Alignment);
 
   // Assign the slot.
   StackSlotForVirtReg[VirtReg] = FrameIdx;
@@ -1195,8 +1195,8 @@ void RegAllocFast::allocateInstruction(MachineInstr &MI) {
 
   // Kill dead defs after the scan to ensure that multiple defs of the same
   // register are allocated identically. We didn't need to do this for uses
-  // because we are crerating our own kill flags, and they are always at the
-  // last use.
+  // because we are creating our own kill flags, and they are always at the last
+  // use.
   for (Register VirtReg : VirtDead)
     killVirtReg(VirtReg);
   VirtDead.clear();
@@ -1209,7 +1209,7 @@ void RegAllocFast::allocateInstruction(MachineInstr &MI) {
 }
 
 void RegAllocFast::handleDebugValue(MachineInstr &MI) {
-  MachineOperand &MO = MI.getOperand(0);
+  MachineOperand &MO = MI.getDebugOperand(0);
 
   // Ignore DBG_VALUEs that aren't based on virtual registers. These are
   // mostly constants and frame indices.

@@ -8,11 +8,11 @@
 
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/Diagnostics.h"
-#include "mlir/IR/DialectHooks.h"
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/DialectInterface.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Operation.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Regex.h"
@@ -23,42 +23,41 @@ using namespace detail;
 DialectAsmParser::~DialectAsmParser() {}
 
 //===----------------------------------------------------------------------===//
-// Dialect Registration
+// Dialect Registration (DEPRECATED)
 //===----------------------------------------------------------------------===//
 
-// Registry for all dialect allocation functions.
-static llvm::ManagedStatic<SmallVector<DialectAllocatorFunction, 8>>
-    dialectRegistry;
+/// Registry for all dialect allocation functions.
+static llvm::ManagedStatic<DialectRegistry> dialectRegistry;
+DialectRegistry &mlir::getGlobalDialectRegistry() { return *dialectRegistry; }
 
-// Registry for functions that set dialect hooks.
-static llvm::ManagedStatic<SmallVector<DialectHooksSetter, 8>>
-    dialectHooksRegistry;
-
-/// Registers a specific dialect creation function with the system, typically
-/// used through the DialectRegistration template.
-void mlir::registerDialectAllocator(const DialectAllocatorFunction &function) {
-  assert(function &&
-         "Attempting to register an empty dialect initialize function");
-  dialectRegistry->push_back(function);
+// Note: deprecated, will be removed soon.
+static bool isGlobalDialectRegistryEnabledFlag = false;
+void mlir::enableGlobalDialectRegistry(bool enable) {
+  isGlobalDialectRegistryEnabledFlag = enable;
+}
+bool mlir::isGlobalDialectRegistryEnabled() {
+  return isGlobalDialectRegistryEnabledFlag;
 }
 
-/// Registers a function to set specific hooks for a specific dialect, typically
-/// used through the DialectHooksRegistration template.
-void mlir::registerDialectHooksSetter(const DialectHooksSetter &function) {
-  assert(
-      function &&
-      "Attempting to register an empty dialect hooks initialization function");
-
-  dialectHooksRegistry->push_back(function);
-}
-
-/// Registers all dialects and their const folding hooks with the specified
-/// MLIRContext.
 void mlir::registerAllDialects(MLIRContext *context) {
-  for (const auto &fn : *dialectRegistry)
-    fn(context);
-  for (const auto &fn : *dialectHooksRegistry) {
-    fn(context);
+  dialectRegistry->appendTo(context->getDialectRegistry());
+}
+
+Dialect *DialectRegistry::loadByName(StringRef name, MLIRContext *context) {
+  auto it = registry.find(name.str());
+  if (it == registry.end())
+    return nullptr;
+  return it->second.second(context);
+}
+
+void DialectRegistry::insert(TypeID typeID, StringRef name,
+                             DialectAllocatorFunction ctor) {
+  auto inserted = registry.insert(
+      std::make_pair(std::string(name), std::make_pair(typeID, ctor)));
+  if (!inserted.second && inserted.first->second.first != typeID) {
+    llvm::report_fatal_error(
+        "Trying to register different dialects for the same namespace: " +
+        name);
   }
 }
 
@@ -66,10 +65,9 @@ void mlir::registerAllDialects(MLIRContext *context) {
 // Dialect
 //===----------------------------------------------------------------------===//
 
-Dialect::Dialect(StringRef name, MLIRContext *context)
-    : name(name), context(context) {
+Dialect::Dialect(StringRef name, MLIRContext *context, TypeID id)
+    : name(name), dialectID(id), context(context) {
   assert(isValidNamespace(name) && "invalid dialect namespace");
-  registerDialect(context);
 }
 
 Dialect::~Dialect() {}
@@ -137,8 +135,8 @@ void Dialect::addInterface(std::unique_ptr<DialectInterface> interface) {
 DialectInterface::~DialectInterface() {}
 
 DialectInterfaceCollectionBase::DialectInterfaceCollectionBase(
-    MLIRContext *ctx, ClassID *interfaceKind) {
-  for (auto *dialect : ctx->getRegisteredDialects()) {
+    MLIRContext *ctx, TypeID interfaceKind) {
+  for (auto *dialect : ctx->getLoadedDialects()) {
     if (auto *interface = dialect->getRegisteredInterface(interfaceKind)) {
       interfaces.insert(interface);
       orderedInterfaces.push_back(interface);
