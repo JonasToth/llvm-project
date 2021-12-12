@@ -27,6 +27,7 @@ add_clang_library(clangTidyCppCoreGuidelinesModule
   ProTypeVarargCheck.cpp
   SlicingCheck.cpp
   SpecialMemberFunctionsCheck.cpp
+  VirtualClassDestructorCheck.cpp
 
   LINK_LIBS
   clangAnalysis

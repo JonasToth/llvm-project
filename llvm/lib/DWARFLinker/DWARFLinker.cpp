@@ -409,10 +409,10 @@ static bool dieNeedsChildrenToBeMeaningful(uint32_t Tag) {
 void DWARFLinker::cleanupAuxiliarryData(LinkContext &Context) {
   Context.clear();
 
-  for (auto I = DIEBlocks.begin(), E = DIEBlocks.end(); I != E; ++I)
-    (*I)->~DIEBlock();
-  for (auto I = DIELocs.begin(), E = DIELocs.end(); I != E; ++I)
-    (*I)->~DIELoc();
+  for (DIEBlock *I : DIEBlocks)
+    I->~DIEBlock();
+  for (DIELoc *I : DIELocs)
+    I->~DIELoc();
 
   DIEBlocks.clear();
   DIELocs.clear();
@@ -549,6 +549,7 @@ static void updateChildIncompleteness(const DWARFDie &Die, CompileUnit &CU,
   switch (Die.getTag()) {
   case dwarf::DW_TAG_structure_type:
   case dwarf::DW_TAG_class_type:
+  case dwarf::DW_TAG_union_type:
     break;
   default:
     return;

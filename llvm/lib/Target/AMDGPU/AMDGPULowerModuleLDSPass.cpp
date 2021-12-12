@@ -24,13 +24,6 @@
 // A possible future refinement is to specialise the structure per-kernel, so
 // that fields can be elided based on more expensive analysis.
 //
-// NOTE: Since this pass will directly pack LDS (assume large LDS) into a struct
-// type which would cause allocating huge memory for struct instance within
-// every kernel. Hence, before running this pass, it is advisable to run the
-// pass "amdgpu-replace-lds-use-with-pointer" which will replace LDS uses within
-// non-kernel functions by pointers and thereby minimizes the unnecessary per
-// kernel allocation of LDS memory.
-//
 //===----------------------------------------------------------------------===//
 
 #include "AMDGPU.h"
@@ -61,6 +54,20 @@ static cl::opt<bool> SuperAlignLDSGlobals(
     cl::init(true), cl::Hidden);
 
 namespace {
+
+SmallPtrSet<GlobalValue *, 32> getUsedList(Module &M) {
+  SmallPtrSet<GlobalValue *, 32> UsedList;
+
+  SmallVector<GlobalValue *, 32> TmpVec;
+  collectUsedGlobalVariables(M, TmpVec, true);
+  UsedList.insert(TmpVec.begin(), TmpVec.end());
+
+  TmpVec.clear();
+  collectUsedGlobalVariables(M, TmpVec, false);
+  UsedList.insert(TmpVec.begin(), TmpVec.end());
+
+  return UsedList;
+}
 
 class AMDGPULowerModuleLDS : public ModulePass {
 
@@ -105,11 +112,9 @@ class AMDGPULowerModuleLDS : public ModulePass {
   removeFromUsedLists(Module &M,
                       const std::vector<GlobalVariable *> &LocalVars) {
     SmallPtrSet<Constant *, 32> LocalVarsSet;
-    for (size_t I = 0; I < LocalVars.size(); I++) {
-      if (Constant *C = dyn_cast<Constant>(LocalVars[I]->stripPointerCasts())) {
+    for (GlobalVariable *LocalVar : LocalVars)
+      if (Constant *C = dyn_cast<Constant>(LocalVar->stripPointerCasts()))
         LocalVarsSet.insert(C);
-      }
-    }
     removeFromUsedList(M, "llvm.used", LocalVarsSet);
     removeFromUsedList(M, "llvm.compiler.used", LocalVarsSet);
   }
@@ -119,7 +124,7 @@ class AMDGPULowerModuleLDS : public ModulePass {
     // The llvm.amdgcn.module.lds instance is implicitly used by all kernels
     // that might call a function which accesses a field within it. This is
     // presently approximated to 'all kernels' if there are any such functions
-    // in the module. This implicit use is reified as an explicit use here so
+    // in the module. This implicit use is redefined as an explicit use here so
     // that later passes, specifically PromoteAlloca, account for the required
     // memory without any knowledge of this transform.
 
@@ -158,7 +163,7 @@ public:
   }
 
   bool runOnModule(Module &M) override {
-    UsedList = AMDGPU::getUsedList(M);
+    UsedList = getUsedList(M);
 
     bool Changed = processUsedLDS(M);
 
@@ -343,20 +348,14 @@ private:
       refineUsesAlignmentAndAA(GEP, A, DL, AliasScope, NoAlias);
     }
 
-    // Mark kernels with asm that reads the address of the allocated structure
-    // This is not necessary for lowering. This lets other passes, specifically
-    // PromoteAlloca, accurately calculate how much LDS will be used by the
-    // kernel after lowering.
+    // This ensures the variable is allocated when called functions access it.
+    // It also lets other passes, specifically PromoteAlloca, accurately
+    // calculate how much LDS will be used by the kernel after lowering.
     if (!F) {
       IRBuilder<> Builder(Ctx);
-      SmallPtrSet<Function *, 32> Kernels;
       for (Function &Func : M.functions()) {
-        if (Func.isDeclaration())
-          continue;
-
-        if (AMDGPU::isKernelCC(&Func) && !Kernels.contains(&Func)) {
+        if (!Func.isDeclaration() && AMDGPU::isKernelCC(&Func)) {
           markUsedByKernel(Builder, &Func, SGV);
-          Kernels.insert(&Func);
         }
       }
     }
@@ -373,11 +372,12 @@ private:
       if (auto *I = dyn_cast<Instruction>(U)) {
         if (AliasScope && I->mayReadOrWriteMemory()) {
           MDNode *AS = I->getMetadata(LLVMContext::MD_alias_scope);
-          AS = MDNode::concatenate(AS, AliasScope);
+          AS = (AS ? MDNode::getMostGenericAliasScope(AS, AliasScope)
+                   : AliasScope);
           I->setMetadata(LLVMContext::MD_alias_scope, AS);
 
           MDNode *NA = I->getMetadata(LLVMContext::MD_noalias);
-          NA = MDNode::concatenate(NA, NoAlias);
+          NA = (NA ? MDNode::intersect(NA, NoAlias) : NoAlias);
           I->setMetadata(LLVMContext::MD_noalias, NA);
         }
       }

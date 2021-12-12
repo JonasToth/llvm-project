@@ -293,10 +293,10 @@ public:
   PHINode *getPrimaryInduction() { return PrimaryInduction; }
 
   /// Returns the reduction variables found in the loop.
-  ReductionList &getReductionVars() { return Reductions; }
+  const ReductionList &getReductionVars() const { return Reductions; }
 
   /// Returns the induction variables found in the loop.
-  InductionList &getInductionVars() { return Inductions; }
+  const InductionList &getInductionVars() const { return Inductions; }
 
   /// Return the first-order recurrences found in the loop.
   RecurrenceSet &getFirstOrderRecurrences() { return FirstOrderRecurrences; }
@@ -308,23 +308,27 @@ public:
   Type *getWidestInductionType() { return WidestIndTy; }
 
   /// Returns True if V is a Phi node of an induction variable in this loop.
-  bool isInductionPhi(const Value *V);
+  bool isInductionPhi(const Value *V) const;
+
+  /// Returns a pointer to the induction descriptor, if \p Phi is an integer or
+  /// floating point induction.
+  const InductionDescriptor *getIntOrFpInductionDescriptor(PHINode *Phi) const;
 
   /// Returns True if V is a cast that is part of an induction def-use chain,
   /// and had been proven to be redundant under a runtime guard (in other
   /// words, the cast has the same SCEV expression as the induction phi).
-  bool isCastedInductionVariable(const Value *V);
+  bool isCastedInductionVariable(const Value *V) const;
 
   /// Returns True if V can be considered as an induction variable in this
   /// loop. V can be the induction phi, or some redundant cast in the def-use
   /// chain of the inducion phi.
-  bool isInductionVariable(const Value *V);
+  bool isInductionVariable(const Value *V) const;
 
   /// Returns True if PN is a reduction variable in this loop.
-  bool isReductionVariable(PHINode *PN) { return Reductions.count(PN); }
+  bool isReductionVariable(PHINode *PN) const { return Reductions.count(PN); }
 
   /// Returns True if Phi is a first-order recurrence in this loop.
-  bool isFirstOrderRecurrence(const PHINode *Phi);
+  bool isFirstOrderRecurrence(const PHINode *Phi) const;
 
   /// Return true if the block BB needs to be predicated in order for the loop
   /// to be vectorized.
@@ -340,7 +344,7 @@ public:
   /// -1 - Address is consecutive, and decreasing.
   /// NOTE: This method must only be used before modifying the original scalar
   /// loop. Do not use after invoking 'createVectorizedLoopSkeleton' (PR34965).
-  int isConsecutivePtr(Value *Ptr) const;
+  int isConsecutivePtr(Type *AccessTy, Value *Ptr) const;
 
   /// Returns true if the value V is uniform within the loop.
   bool isUniform(Value *V);

@@ -683,6 +683,9 @@ public:
                           omp::IdentFlag Flags = omp::IdentFlag(0),
                           unsigned Reserve2Flags = 0);
 
+  /// Create a global flag \p Namein the module with initial value \p Value.
+  GlobalValue *createGlobalFlag(unsigned Value, StringRef Name);
+
   /// Generate control flow and cleanup for cancellation.
   ///
   /// \param CancelFlag Flag indicating if the cancellation is performed.
@@ -1001,14 +1004,16 @@ public:
   /// \param Loc The insert and source location description.
   /// \param IsSPMD Flag to indicate if the kernel is an SPMD kernel or not.
   /// \param RequiresFullRuntime Indicate if a full device runtime is necessary.
-  InsertPointTy createTargetInit(const LocationDescription &Loc, bool IsSPMD, bool RequiresFullRuntime);
+  InsertPointTy createTargetInit(const LocationDescription &Loc, bool IsSPMD,
+                                 bool RequiresFullRuntime);
 
   /// Create a runtime call for kmpc_target_deinit
   ///
   /// \param Loc The insert and source location description.
   /// \param IsSPMD Flag to indicate if the kernel is an SPMD kernel or not.
   /// \param RequiresFullRuntime Indicate if a full device runtime is necessary.
-  void createTargetDeinit(const LocationDescription &Loc, bool IsSPMD, bool RequiresFullRuntime);
+  void createTargetDeinit(const LocationDescription &Loc, bool IsSPMD,
+                          bool RequiresFullRuntime);
 
   ///}
 
@@ -1161,9 +1166,9 @@ private:
   /// \param UpdateOp 	Code generator for complex expressions that cannot be
   ///                   expressed through atomicrmw instruction.
   /// \param VolatileX	     true if \a X volatile?
-  /// \param IsXLHSInRHSPart true if \a X is Left H.S. in Right H.S. part of
-  ///                        the update expression, false otherwise.
-  ///                        (e.g. true for X = X BinOp Expr)
+  /// \param IsXBinopExpr true if \a X is Left H.S. in Right H.S. part of the
+  ///                     update expression, false otherwise.
+  ///                     (e.g. true for X = X BinOp Expr)
   ///
   /// \returns A pair of the old value of X before the update, and the value
   ///          used for the update.
@@ -1172,7 +1177,7 @@ private:
                                                AtomicRMWInst::BinOp RMWOp,
                                                AtomicUpdateCallbackTy &UpdateOp,
                                                bool VolatileX,
-                                               bool IsXLHSInRHSPart);
+                                               bool IsXBinopExpr);
 
   /// Emit the binary op. described by \p RMWOp, using \p Src1 and \p Src2 .
   ///
@@ -1230,9 +1235,9 @@ public:
   ///                 atomic will be generated.
   /// \param UpdateOp 	Code generator for complex expressions that cannot be
   ///                   expressed through atomicrmw instruction.
-  /// \param IsXLHSInRHSPart true if \a X is Left H.S. in Right H.S. part of
-  ///                        the update expression, false otherwise.
-  ///	                       (e.g. true for X = X BinOp Expr)
+  /// \param IsXBinopExpr true if \a X is Left H.S. in Right H.S. part of the
+  ///                     update expression, false otherwise.
+  ///	                    (e.g. true for X = X BinOp Expr)
   ///
   /// \return Insertion point after generated atomic update IR.
   InsertPointTy createAtomicUpdate(const LocationDescription &Loc,
@@ -1240,7 +1245,7 @@ public:
                                    Value *Expr, AtomicOrdering AO,
                                    AtomicRMWInst::BinOp RMWOp,
                                    AtomicUpdateCallbackTy &UpdateOp,
-                                   bool IsXLHSInRHSPart);
+                                   bool IsXBinopExpr);
 
   /// Emit atomic update for constructs: --- Only Scalar data types
   /// V = X; X = X BinOp Expr ,
@@ -1264,9 +1269,9 @@ public:
   ///                   expressed through atomicrmw instruction.
   /// \param UpdateExpr true if X is an in place update of the form
   ///                   X = X BinOp Expr or X = Expr BinOp X
-  /// \param IsXLHSInRHSPart true if X is Left H.S. in Right H.S. part of the
-  ///                        update expression, false otherwise.
-  ///                        (e.g. true for X = X BinOp Expr)
+  /// \param IsXBinopExpr true if X is Left H.S. in Right H.S. part of the
+  ///                     update expression, false otherwise.
+  ///                     (e.g. true for X = X BinOp Expr)
   /// \param IsPostfixUpdate true if original value of 'x' must be stored in
   ///                        'v', not an updated one.
   ///
@@ -1276,7 +1281,7 @@ public:
                       AtomicOpValue &X, AtomicOpValue &V, Value *Expr,
                       AtomicOrdering AO, AtomicRMWInst::BinOp RMWOp,
                       AtomicUpdateCallbackTy &UpdateOp, bool UpdateExpr,
-                      bool IsPostfixUpdate, bool IsXLHSInRHSPart);
+                      bool IsPostfixUpdate, bool IsXBinopExpr);
 
   /// Create the control flow structure of a canonical OpenMP loop.
   ///
@@ -1403,13 +1408,10 @@ class CanonicalLoopInfo {
   friend class OpenMPIRBuilder;
 
 private:
-  BasicBlock *Preheader = nullptr;
   BasicBlock *Header = nullptr;
   BasicBlock *Cond = nullptr;
-  BasicBlock *Body = nullptr;
   BasicBlock *Latch = nullptr;
   BasicBlock *Exit = nullptr;
-  BasicBlock *After = nullptr;
 
   /// Add the control blocks of this loop to \p BBs.
   ///
@@ -1431,10 +1433,7 @@ public:
   /// Code that must be execute before any loop iteration can be emitted here,
   /// such as computing the loop trip count and begin lifetime markers. Code in
   /// the preheader is not considered part of the canonical loop.
-  BasicBlock *getPreheader() const {
-    assert(isValid() && "Requires a valid canonical loop");
-    return Preheader;
-  }
+  BasicBlock *getPreheader() const;
 
   /// The header is the entry for each iteration. In the canonical control flow,
   /// it only contains the PHINode for the induction variable.
@@ -1455,7 +1454,7 @@ public:
   /// eventually branch to the \p Latch block.
   BasicBlock *getBody() const {
     assert(isValid() && "Requires a valid canonical loop");
-    return Body;
+    return cast<BranchInst>(Cond->getTerminator())->getSuccessor(0);
   }
 
   /// Reaching the latch indicates the end of the loop body code. In the
@@ -1479,7 +1478,7 @@ public:
   /// statements/cancellations).
   BasicBlock *getAfter() const {
     assert(isValid() && "Requires a valid canonical loop");
-    return After;
+    return Exit->getSingleSuccessor();
   }
 
   /// Returns the llvm::Value containing the number of loop iterations. It must
@@ -1510,18 +1509,21 @@ public:
   /// Return the insertion point for user code before the loop.
   OpenMPIRBuilder::InsertPointTy getPreheaderIP() const {
     assert(isValid() && "Requires a valid canonical loop");
+    BasicBlock *Preheader = getPreheader();
     return {Preheader, std::prev(Preheader->end())};
   };
 
   /// Return the insertion point for user code in the body.
   OpenMPIRBuilder::InsertPointTy getBodyIP() const {
     assert(isValid() && "Requires a valid canonical loop");
+    BasicBlock *Body = getBody();
     return {Body, Body->begin()};
   };
 
   /// Return the insertion point for user code after the loop.
   OpenMPIRBuilder::InsertPointTy getAfterIP() const {
     assert(isValid() && "Requires a valid canonical loop");
+    BasicBlock *After = getAfter();
     return {After, After->begin()};
   };
 

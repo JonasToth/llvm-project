@@ -404,7 +404,7 @@ KnownBits KnownBits::abs(bool IntMinIsPoison) const {
   // We only know that the absolute values's MSB will be zero if INT_MIN is
   // poison, or there is a set bit that isn't the sign bit (otherwise it could
   // be INT_MIN).
-  if (IntMinIsPoison || (!One.isNullValue() && !One.isMinSignedValue()))
+  if (IntMinIsPoison || (!One.isZero() && !One.isMinSignedValue()))
     KnownAbs.Zero.setSignBit();
 
   // FIXME: Handle known negative input?
@@ -412,17 +412,26 @@ KnownBits KnownBits::abs(bool IntMinIsPoison) const {
   return KnownAbs;
 }
 
-KnownBits KnownBits::mul(const KnownBits &LHS, const KnownBits &RHS) {
+KnownBits KnownBits::mul(const KnownBits &LHS, const KnownBits &RHS,
+                         bool SelfMultiply) {
   unsigned BitWidth = LHS.getBitWidth();
   assert(BitWidth == RHS.getBitWidth() && !LHS.hasConflict() &&
          !RHS.hasConflict() && "Operand mismatch");
+  assert((!SelfMultiply || (LHS.One == RHS.One && LHS.Zero == RHS.Zero)) &&
+         "Self multiplication knownbits mismatch");
 
   // Compute a conservative estimate for high known-0 bits.
-  unsigned LeadZ =
-      std::max(LHS.countMinLeadingZeros() + RHS.countMinLeadingZeros(),
-               BitWidth) -
-      BitWidth;
-  LeadZ = std::min(LeadZ, BitWidth);
+  // TODO: This could be generalized to number of sign bits (negative numbers).
+  unsigned LHSLeadZ = LHS.countMinLeadingZeros();
+  unsigned RHSLeadZ = RHS.countMinLeadingZeros();
+
+  // If either operand is a power-of-2, the multiply is only shifting bits in
+  // the other operand (there can't be a carry into the M+N bit of the result).
+  // Note: if we know that a value is entirely 0, that should simplify below.
+  bool BonusLZ = LHS.countMaxPopulation() == 1 || RHS.countMaxPopulation() == 1;
+
+  unsigned LeadZ = std::max(LHSLeadZ + RHSLeadZ + BonusLZ, BitWidth) - BitWidth;
+  assert(LeadZ <= BitWidth && "More zeros than bits?");
 
   // The result of the bottom bits of an integer multiply can be
   // inferred by looking at the bottom bits of both operands and
@@ -489,6 +498,14 @@ KnownBits KnownBits::mul(const KnownBits &LHS, const KnownBits &RHS) {
   Res.Zero.setHighBits(LeadZ);
   Res.Zero |= (~BottomKnown).getLoBits(ResultBitsKnown);
   Res.One = BottomKnown.getLoBits(ResultBitsKnown);
+
+  // If we're self-multiplying then bit[1] is guaranteed to be zero.
+  if (SelfMultiply && BitWidth > 1) {
+    assert(Res.One[1] == 0 &&
+           "Self-multiplication failed Quadratic Reciprocity!");
+    Res.Zero.setBit(1);
+  }
+
   return Res;
 }
 

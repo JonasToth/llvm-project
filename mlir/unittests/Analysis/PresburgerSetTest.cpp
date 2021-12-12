@@ -15,11 +15,23 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Analysis/PresburgerSet.h"
+#include "./AffineStructuresParser.h"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 namespace mlir {
+
+/// Parses a FlatAffineConstraints from a StringRef. It is expected that the
+/// string represents a valid IntegerSet, otherwise it will violate a gtest
+/// assertion.
+static FlatAffineConstraints parseFAC(StringRef str, MLIRContext *context) {
+  FailureOr<FlatAffineConstraints> fac = parseIntegerSetToFAC(str, context);
+
+  EXPECT_TRUE(succeeded(fac));
+
+  return *fac;
+}
 
 /// Compute the union of s and t, and check that each of the given points
 /// belongs to the union iff it belongs to at least one of s and t.
@@ -80,12 +92,17 @@ static void testComplementAtPoints(PresburgerSet s,
 }
 
 /// Construct a FlatAffineConstraints from a set of inequality and
-/// equality constraints.
+/// equality constraints. `numIds` is the total number of ids, of which
+/// `numLocals` is the number of local ids.
 static FlatAffineConstraints
-makeFACFromConstraints(unsigned dims, ArrayRef<SmallVector<int64_t, 4>> ineqs,
-                       ArrayRef<SmallVector<int64_t, 4>> eqs) {
-  FlatAffineConstraints fac(ineqs.size(), eqs.size(), dims + 1, dims,
-                            /*numSymbols=*/0, /*numLocals=*/0);
+makeFACFromConstraints(unsigned numIds, ArrayRef<SmallVector<int64_t, 4>> ineqs,
+                       ArrayRef<SmallVector<int64_t, 4>> eqs,
+                       unsigned numLocals = 0) {
+  FlatAffineConstraints fac(/*numReservedInequalities=*/ineqs.size(),
+                            /*numReservedEqualities=*/eqs.size(),
+                            /*numReservedCols=*/numIds + 1,
+                            /*numDims=*/numIds - numLocals,
+                            /*numSymbols=*/0, numLocals);
   for (const SmallVector<int64_t, 4> &eq : eqs)
     fac.addEquality(eq);
   for (const SmallVector<int64_t, 4> &ineq : ineqs)
@@ -93,14 +110,22 @@ makeFACFromConstraints(unsigned dims, ArrayRef<SmallVector<int64_t, 4>> ineqs,
   return fac;
 }
 
+/// Construct a FlatAffineConstraints having `numDims` dimensions from the given
+/// set of inequality constraints. This is a convenience function to be used
+/// when the FAC to be constructed does not have any local ids and does not have
+/// equalties.
 static FlatAffineConstraints
-makeFACFromIneqs(unsigned dims, ArrayRef<SmallVector<int64_t, 4>> ineqs) {
-  return makeFACFromConstraints(dims, ineqs, {});
+makeFACFromIneqs(unsigned numDims, ArrayRef<SmallVector<int64_t, 4>> ineqs) {
+  return makeFACFromConstraints(numDims, ineqs, /*eqs=*/{});
 }
 
-static PresburgerSet makeSetFromFACs(unsigned dims,
+/// Construct a PresburgerSet having `numDims` dimensions and no symbols from
+/// the given list of FlatAffineConstraints. Each FAC in `facs` should also have
+/// `numDims` dimensions and no symbols, although it can have any number of
+/// local ids.
+static PresburgerSet makeSetFromFACs(unsigned numDims,
                                      ArrayRef<FlatAffineConstraints> facs) {
-  PresburgerSet set = PresburgerSet::getEmptySet(dims);
+  PresburgerSet set = PresburgerSet::getEmptySet(numDims);
   for (const FlatAffineConstraints &fac : facs)
     set.unionFACInPlace(fac);
   return set;
@@ -211,8 +236,15 @@ TEST(SetTest, Intersect) {
 }
 
 TEST(SetTest, Subtract) {
-  // The interval [2, 8] minus
-  // the interval [10, 20].
+  // The interval [2, 8] minus the interval [10, 20].
+  testSubtractAtPoints(
+      makeSetFromFACs(1, {makeFACFromIneqs(1, {{1, -2},      // x >= 2.
+                                               {-1, 8}})}),  // x <= 8.
+      makeSetFromFACs(1, {makeFACFromIneqs(1, {{1, -10},     // x >= 10.
+                                               {-1, 20}})}), // x <= 20.
+      {{1}, {2}, {8}, {9}, {10}, {20}, {21}});
+
+  // Universe minus [2, 8] U [10, 20]
   testSubtractAtPoints(
       makeSetFromFACs(1, {makeFACFromIneqs(1, {})}),
       makeSetFromFACs(1,
@@ -590,6 +622,222 @@ TEST(SetTest, isEqual) {
   EXPECT_FALSE(universeRect.isEqual(rect));
   EXPECT_FALSE(universeSquare.isEqual(square));
   EXPECT_FALSE(rect.complement().isEqual(square.complement()));
+}
+
+void expectEqual(const PresburgerSet &s, const PresburgerSet &t) {
+  EXPECT_TRUE(s.isEqual(t));
+}
+
+void expectEmpty(PresburgerSet s) { EXPECT_TRUE(s.isIntegerEmpty()); }
+
+TEST(SetTest, divisions) {
+  MLIRContext context;
+  // Note: we currently need to add the equalities as inequalities to the FAC
+  // since detecting divisions based on equalities is not yet supported.
+
+  // evens = {x : exists q, x = 2q}.
+  PresburgerSet evens{
+      makeFACFromConstraints(2, {{1, -2, 0}, {-1, 2, 1}}, {{1, -2, 0}}, 1)};
+  // odds = {x : exists q, x = 2q + 1}.
+  PresburgerSet odds{
+      makeFACFromConstraints(2, {{1, -2, 0}, {-1, 2, 1}}, {{1, -2, -1}}, 1)};
+  // multiples6 = {x : exists q, x = 6q}.
+  PresburgerSet multiples3{
+      makeFACFromConstraints(2, {{1, -3, 0}, {-1, 3, 2}}, {{1, -3, 0}}, 1)};
+  // multiples6 = {x : exists q, x = 6q}.
+  PresburgerSet multiples6{
+      makeFACFromConstraints(2, {{1, -6, 0}, {-1, 6, 5}}, {{1, -6, 0}}, 1)};
+
+  // evens /\ odds = empty.
+  expectEmpty(PresburgerSet(evens).intersect(PresburgerSet(odds)));
+  // evens U odds = universe.
+  expectEqual(evens.unionSet(odds), PresburgerSet::getUniverse(1));
+  expectEqual(evens.complement(), odds);
+  expectEqual(odds.complement(), evens);
+  // even multiples of 3 = multiples of 6.
+  expectEqual(multiples3.intersect(evens), multiples6);
+
+  PresburgerSet setA =
+      makeSetFromFACs(1, {parseFAC("(x) : (-x >= 0)", &context)});
+  PresburgerSet setB =
+      makeSetFromFACs(1, {parseFAC("(x) : (x floordiv 2 - 4 >= 0)", &context)});
+  EXPECT_TRUE(setA.subtract(setB).isEqual(setA));
+}
+
+/// Coalesce `set` and check that the `newSet` is equal to `set and that
+/// `expectedNumFACs` matches the number of FACs in the coalesced set.
+/// If one of the two
+void expectCoalesce(size_t expectedNumFACs, const PresburgerSet set) {
+  PresburgerSet newSet = set.coalesce();
+  EXPECT_TRUE(set.isEqual(newSet));
+  EXPECT_TRUE(expectedNumFACs == newSet.getNumFACs());
+}
+
+TEST(SetTest, coalesceNoFAC) {
+  PresburgerSet set = makeSetFromFACs(0, {});
+  expectCoalesce(0, set);
+}
+
+TEST(SetTest, coalesceContainedOneDim) {
+  MLIRContext context;
+  PresburgerSet set = makeSetFromFACs(
+      1, {parseFAC("(x) : (x >= 0, -x + 4 >= 0)", &context),
+          parseFAC("(x) : (x - 1 >= 0, -x + 2 >= 0)", &context)});
+  expectCoalesce(1, set);
+}
+
+TEST(SetTest, coalesceFirstEmpty) {
+  MLIRContext context;
+  PresburgerSet set = makeSetFromFACs(
+      1, {
+             parseFAC("(x) : ( x >= 0, -x - 1 >= 0)", &context),
+             parseFAC("(x) : ( x - 1 >= 0, -x + 2 >= 0)", &context),
+         });
+  expectCoalesce(1, set);
+}
+
+TEST(SetTest, coalesceSecondEmpty) {
+  MLIRContext context;
+  PresburgerSet set =
+      makeSetFromFACs(1, {parseFAC("(x) : (x - 1 >= 0, -x + 2 >= 0)", &context),
+                          parseFAC("(x) : (x >= 0, -x - 1 >= 0)", &context)});
+  expectCoalesce(1, set);
+}
+
+TEST(SetTest, coalesceBothEmpty) {
+  MLIRContext context;
+  PresburgerSet set = makeSetFromFACs(
+      1, {
+             parseFAC("(x) : (x - 3 >= 0, -x - 1 >= 0)", &context),
+             parseFAC("(x) : (x >= 0, -x - 1 >= 0)", &context),
+         });
+  expectCoalesce(0, set);
+}
+
+TEST(SetTest, coalesceFirstUniv) {
+  MLIRContext context;
+  PresburgerSet set =
+      makeSetFromFACs(1, {parseFAC("(x) : ()", &context),
+                          parseFAC("(x) : ( x >= 0, -x + 1 >= 0)", &context)});
+  expectCoalesce(1, set);
+}
+
+TEST(SetTest, coalesceSecondUniv) {
+  MLIRContext context;
+  PresburgerSet set =
+      makeSetFromFACs(1, {parseFAC("(x) : ( x >= 0, -x + 1 >= 0)", &context),
+                          parseFAC("(x) : ()", &context)});
+  expectCoalesce(1, set);
+}
+
+TEST(SetTest, coalesceBothUniv) {
+  MLIRContext context;
+  PresburgerSet set = makeSetFromFACs(
+      1, {parseFAC("(x) : ()", &context), parseFAC("(x) : ()", &context)});
+  expectCoalesce(1, set);
+}
+
+TEST(SetTest, coalesceFirstUnivSecondEmpty) {
+  MLIRContext context;
+  PresburgerSet set =
+      makeSetFromFACs(1, {parseFAC("(x) : ()", &context),
+                          parseFAC("(x) : ( x >= 0, -x - 1 >= 0)", &context)});
+  expectCoalesce(1, set);
+}
+
+TEST(SetTest, coalesceFirstEmptySecondUniv) {
+  MLIRContext context;
+  PresburgerSet set =
+      makeSetFromFACs(1, {parseFAC("(x) : ( x >= 0, -x - 1 >= 0)", &context),
+                          parseFAC("(x) : ()", &context)});
+  expectCoalesce(1, set);
+}
+
+TEST(SetTest, coalesceCutOneDim) {
+  MLIRContext context;
+  PresburgerSet set = makeSetFromFACs(
+      1, {parseFAC("(x) : ( x >= 0, -x + 3 >= 0)", &context),
+          parseFAC("(x) : ( x - 2 >= 0, -x + 4 >= 0)", &context)});
+  expectCoalesce(2, set);
+}
+
+TEST(SetTest, coalesceSeparateOneDim) {
+  MLIRContext context;
+  PresburgerSet set = makeSetFromFACs(
+      1, {parseFAC("(x) : ( x >= 0, -x + 2 >= 0)", &context),
+          parseFAC("(x) : ( x - 3 >= 0, -x + 4 >= 0)", &context)});
+  expectCoalesce(2, set);
+}
+
+TEST(SetTest, coalesceContainedTwoDim) {
+  MLIRContext context;
+  PresburgerSet set = makeSetFromFACs(
+      2,
+      {parseFAC("(x,y) : (x >= 0, -x + 3 >= 0, y >= 0, -y + 3 >= 0)", &context),
+       parseFAC("(x,y) : (x >= 0, -x + 3 >= 0, y - 2 >= 0, -y + 3 >= 0)",
+                &context)});
+  expectCoalesce(1, set);
+}
+
+TEST(SetTest, coalesceCutTwoDim) {
+  MLIRContext context;
+  PresburgerSet set = makeSetFromFACs(
+      2,
+      {parseFAC("(x,y) : (x >= 0, -x + 3 >= 0, y >= 0, -y + 2 >= 0)", &context),
+       parseFAC("(x,y) : (x >= 0, -x + 3 >= 0, y - 1 >= 0, -y + 3 >= 0)",
+                &context)});
+  expectCoalesce(2, set);
+}
+
+TEST(SetTest, coalesceSeparateTwoDim) {
+  MLIRContext context;
+  PresburgerSet set = makeSetFromFACs(
+      2,
+      {parseFAC("(x,y) : (x >= 0, -x + 3 >= 0, y >= 0, -y + 1 >= 0)", &context),
+       parseFAC("(x,y) : (x >= 0, -x + 3 >= 0, y - 2 >= 0, -y + 3 >= 0)",
+                &context)});
+  expectCoalesce(2, set);
+}
+
+TEST(SetTest, coalesceContainedEq) {
+  MLIRContext context;
+  PresburgerSet set = makeSetFromFACs(
+      2, {parseFAC("(x,y) : (x >= 0, -x + 3 >= 0, x - y == 0)", &context),
+          parseFAC("(x,y) : (x - 1 >= 0, -x + 2 >= 0, x - y == 0)", &context)});
+  expectCoalesce(1, set);
+}
+
+TEST(SetTest, coalesceCuttingEq) {
+  MLIRContext context;
+  PresburgerSet set = makeSetFromFACs(
+      2, {parseFAC("(x,y) : (x - 1 >= 0, -x + 3 >= 0, x - y == 0)", &context),
+          parseFAC("(x,y) : (x >= 0, -x + 2 >= 0, x - y == 0)", &context)});
+  expectCoalesce(2, set);
+}
+
+TEST(SetTest, coalesceSeparateEq) {
+  MLIRContext context;
+  PresburgerSet set = makeSetFromFACs(
+      2, {parseFAC("(x,y) : (x - 3 >= 0, -x + 4 >= 0, x - y == 0)", &context),
+          parseFAC("(x,y) : (x >= 0, -x + 1 >= 0, x - y == 0)", &context)});
+  expectCoalesce(2, set);
+}
+
+TEST(SetTest, coalesceContainedEqAsIneq) {
+  MLIRContext context;
+  PresburgerSet set = makeSetFromFACs(
+      2, {parseFAC("(x,y) : (x >= 0, -x + 3 >= 0, x - y >= 0, -x + y >= 0)",
+                   &context),
+          parseFAC("(x,y) : (x - 1 >= 0, -x + 2 >= 0, x - y == 0)", &context)});
+  expectCoalesce(1, set);
+}
+
+TEST(SetTest, coalesceContainedEqComplex) {
+  MLIRContext context;
+  PresburgerSet set = makeSetFromFACs(
+      2, {parseFAC("(x,y) : (x - 2 == 0, x - y == 0)", &context),
+          parseFAC("(x,y) : (x - 1 >= 0, -x + 2 >= 0, x - y == 0)", &context)});
+  expectCoalesce(1, set);
 }
 
 } // namespace mlir

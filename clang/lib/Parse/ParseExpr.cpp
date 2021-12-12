@@ -1513,6 +1513,7 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
   case tok::kw___int64:
   case tok::kw___int128:
   case tok::kw__ExtInt:
+  case tok::kw__BitInt:
   case tok::kw_signed:
   case tok::kw_unsigned:
   case tok::kw_half:
@@ -1521,6 +1522,7 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
   case tok::kw___bf16:
   case tok::kw__Float16:
   case tok::kw___float128:
+  case tok::kw___ibm128:
   case tok::kw_void:
   case tok::kw_typename:
   case tok::kw_typeof:

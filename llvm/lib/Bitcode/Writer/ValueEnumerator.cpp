@@ -229,8 +229,11 @@ static void predictValueUseListOrderImpl(const Value *V, const Function *F,
     // have been read (despite having earlier IDs).  Rather than awkwardly
     // modeling this behaviour here, orderModule() has assigned IDs to
     // initializers of GlobalValues before GlobalValues themselves.
-    if (OM.isGlobalValue(LID) && OM.isGlobalValue(RID))
+    if (OM.isGlobalValue(LID) && OM.isGlobalValue(RID)) {
+      if (LID == RID)
+        return LU->getOperandNo() > RU->getOperandNo();
       return LID < RID;
+    }
 
     // If ID is 4, then expect: 7 6 5 1 2 3.
     if (LID < RID) {
@@ -538,9 +541,8 @@ void ValueEnumerator::print(raw_ostream &OS, const ValueMapType &Map,
                             const char *Name) const {
   OS << "Map Name: " << Name << "\n";
   OS << "Size: " << Map.size() << "\n";
-  for (ValueMapType::const_iterator I = Map.begin(),
-         E = Map.end(); I != E; ++I) {
-    const Value *V = I->first;
+  for (const auto &I : Map) {
+    const Value *V = I.first;
     if (V->hasName())
       OS << "Value: " << V->getName();
     else
@@ -566,10 +568,10 @@ void ValueEnumerator::print(raw_ostream &OS, const MetadataMapType &Map,
                             const char *Name) const {
   OS << "Map Name: " << Name << "\n";
   OS << "Size: " << Map.size() << "\n";
-  for (auto I = Map.begin(), E = Map.end(); I != E; ++I) {
-    const Metadata *MD = I->first;
-    OS << "Metadata: slot = " << I->second.ID << "\n";
-    OS << "Metadata: function = " << I->second.F << "\n";
+  for (const auto &I : Map) {
+    const Metadata *MD = I.first;
+    OS << "Metadata: slot = " << I.second.ID << "\n";
+    OS << "Metadata: function = " << I.second.F << "\n";
     MD->print(OS);
     OS << "\n";
   }
@@ -1036,7 +1038,7 @@ void ValueEnumerator::EnumerateAttributes(AttributeList PAL) {
   }
 
   // Do lookups for all attribute groups.
-  for (unsigned i = PAL.index_begin(), e = PAL.index_end(); i != e; ++i) {
+  for (unsigned i : PAL.indexes()) {
     AttributeSet AS = PAL.getAttributes(i);
     if (!AS.hasAttributes())
       continue;
@@ -1145,8 +1147,8 @@ void ValueEnumerator::purgeFunction() {
     ValueMap.erase(Values[i].first);
   for (unsigned i = NumModuleMDs, e = MDs.size(); i != e; ++i)
     MetadataMap.erase(MDs[i]);
-  for (unsigned i = 0, e = BasicBlocks.size(); i != e; ++i)
-    ValueMap.erase(BasicBlocks[i]);
+  for (const BasicBlock *BB : BasicBlocks)
+    ValueMap.erase(BB);
 
   Values.resize(NumModuleValues);
   MDs.resize(NumModuleMDs);

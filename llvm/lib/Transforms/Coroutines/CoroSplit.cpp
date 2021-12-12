@@ -280,6 +280,27 @@ static void replaceFallthroughCoroEnd(AnyCoroEndInst *End,
   BB->getTerminator()->eraseFromParent();
 }
 
+// Mark a coroutine as done, which implies that the coroutine is finished and
+// never get resumed.
+//
+// In resume-switched ABI, the done state is represented by storing zero in
+// ResumeFnAddr.
+//
+// NOTE: We couldn't omit the argument `FramePtr`. It is necessary because the
+// pointer to the frame in splitted function is not stored in `Shape`.
+static void markCoroutineAsDone(IRBuilder<> &Builder, const coro::Shape &Shape,
+                                Value *FramePtr) {
+  assert(
+      Shape.ABI == coro::ABI::Switch &&
+      "markCoroutineAsDone is only supported for Switch-Resumed ABI for now.");
+  auto *GepIndex = Builder.CreateStructGEP(
+      Shape.FrameTy, FramePtr, coro::Shape::SwitchFieldIndex::Resume,
+      "ResumeFn.addr");
+  auto *NullPtr = ConstantPointerNull::get(cast<PointerType>(
+      Shape.FrameTy->getTypeAtIndex(coro::Shape::SwitchFieldIndex::Resume)));
+  Builder.CreateStore(NullPtr, GepIndex);
+}
+
 /// Replace an unwind call to llvm.coro.end.
 static void replaceUnwindCoroEnd(AnyCoroEndInst *End, const coro::Shape &Shape,
                                  Value *FramePtr, bool InResume,
@@ -288,10 +309,18 @@ static void replaceUnwindCoroEnd(AnyCoroEndInst *End, const coro::Shape &Shape,
 
   switch (Shape.ABI) {
   // In switch-lowering, this does nothing in the main function.
-  case coro::ABI::Switch:
+  case coro::ABI::Switch: {
+    // In C++'s specification, the coroutine should be marked as done
+    // if promise.unhandled_exception() throws.  The frontend will
+    // call coro.end(true) along this path.
+    //
+    // FIXME: We should refactor this once there is other language
+    // which uses Switch-Resumed style other than C++.
+    markCoroutineAsDone(Builder, Shape, FramePtr);
     if (!InResume)
       return;
     break;
+  }
   // In async lowering this does nothing.
   case coro::ABI::Async:
     break;
@@ -364,13 +393,9 @@ static void createResumeEntryBlock(Function &F, coro::Shape &Shape) {
     auto *Save = S->getCoroSave();
     Builder.SetInsertPoint(Save);
     if (S->isFinal()) {
-      // Final suspend point is represented by storing zero in ResumeFnAddr.
-      auto *GepIndex = Builder.CreateStructGEP(FrameTy, FramePtr,
-                                 coro::Shape::SwitchFieldIndex::Resume,
-                                  "ResumeFn.addr");
-      auto *NullPtr = ConstantPointerNull::get(cast<PointerType>(
-          FrameTy->getTypeAtIndex(coro::Shape::SwitchFieldIndex::Resume)));
-      Builder.CreateStore(NullPtr, GepIndex);
+      // The coroutine should be marked done if it reaches the final suspend
+      // point.
+      markCoroutineAsDone(Builder, Shape, FramePtr);
     } else {
       auto *GepIndex = Builder.CreateStructGEP(
           FrameTy, FramePtr, Shape.getSwitchIndexField(), "index.addr");
@@ -520,8 +545,8 @@ void CoroCloner::replaceRetconOrAsyncSuspendUses() {
   }
 
   // Try to peephole extracts of an aggregate return.
-  for (auto UI = NewS->use_begin(), UE = NewS->use_end(); UI != UE; ) {
-    auto EVI = dyn_cast<ExtractValueInst>((UI++)->getUser());
+  for (Use &U : llvm::make_early_inc_range(NewS->uses())) {
+    auto *EVI = dyn_cast<ExtractValueInst>(U.getUser());
     if (!EVI || EVI->getNumIndices() != 1)
       continue;
 
@@ -622,12 +647,12 @@ static void replaceSwiftErrorOps(Function &F, coro::Shape &Shape,
 
     // If there are no arguments, this is a 'get' operation.
     Value *MappedResult;
-    if (Op->getNumArgOperands() == 0) {
+    if (Op->arg_empty()) {
       auto ValueTy = Op->getType();
       auto Slot = getSwiftErrorSlot(ValueTy);
       MappedResult = Builder.CreateLoad(ValueTy, Slot);
     } else {
-      assert(Op->getNumArgOperands() == 1);
+      assert(Op->arg_size() == 1);
       auto Value = MappedOp->getArgOperand(0);
       auto ValueTy = Value->getType();
       auto Slot = getSwiftErrorSlot(ValueTy);
@@ -669,7 +694,7 @@ void CoroCloner::salvageDebugInfo() {
   for (DbgVariableIntrinsic *DVI : Worklist) {
     if (IsUnreachableBlock(DVI->getParent()))
       DVI->eraseFromParent();
-    else if (dyn_cast_or_null<AllocaInst>(DVI->getVariableLocationOp(0))) {
+    else if (isa_and_nonnull<AllocaInst>(DVI->getVariableLocationOp(0))) {
       // Count all non-debuginfo uses in reachable blocks.
       unsigned Uses = 0;
       for (auto *User : DVI->getVariableLocationOp(0)->users())
@@ -738,8 +763,7 @@ void CoroCloner::replaceEntryBlock() {
   // entry needs to be moved to the new entry.
   Function *F = OldEntry->getParent();
   DominatorTree DT{*F};
-  for (auto IT = inst_begin(F), End = inst_end(F); IT != End;) {
-    Instruction &I = *IT++;
+  for (Instruction &I : llvm::make_early_inc_range(instructions(F))) {
     auto *Alloca = dyn_cast<AllocaInst>(&I);
     if (!Alloca || I.use_empty())
       continue;
@@ -773,9 +797,8 @@ Value *CoroCloner::deriveNewFramePointer() {
     auto DbgLoc =
         cast<CoroSuspendAsyncInst>(VMap[ActiveSuspend])->getDebugLoc();
     // Calling i8* (i8*)
-    auto *CallerContext = Builder.CreateCall(
-        cast<FunctionType>(ProjectionFunc->getType()->getPointerElementType()),
-        ProjectionFunc, CalleeContext);
+    auto *CallerContext = Builder.CreateCall(ProjectionFunc->getFunctionType(),
+                                             ProjectionFunc, CalleeContext);
     CallerContext->setCallingConv(ProjectionFunc->getCallingConv());
     CallerContext->setDebugLoc(DbgLoc);
     // The frame is located after the async_context header.
@@ -1357,7 +1380,7 @@ static bool hasCallsInBlocksBetween(BasicBlock *SaveBB, BasicBlock *ResDesBB) {
     auto *BB = Worklist.pop_back_val();
     Set.insert(BB);
     for (auto *Pred : predecessors(BB))
-      if (Set.count(Pred) == 0)
+      if (!Set.contains(Pred))
         Worklist.push_back(Pred);
   }
 
@@ -1547,8 +1570,7 @@ static void coerceArguments(IRBuilder<> &Builder, FunctionType *FnTy,
 CallInst *coro::createMustTailCall(DebugLoc Loc, Function *MustTailCallFn,
                                    ArrayRef<Value *> Arguments,
                                    IRBuilder<> &Builder) {
-  auto *FnTy =
-      cast<FunctionType>(MustTailCallFn->getType()->getPointerElementType());
+  auto *FnTy = MustTailCallFn->getFunctionType();
   // Coerce the arguments, llvm optimizations seem to ignore the types in
   // vaarg functions and throws away casts in optimized mode.
   SmallVector<Value *, 8> CallArgs;
@@ -1977,9 +1999,9 @@ static void replacePrepare(CallInst *Prepare, LazyCallGraph &CG,
   //    %2 = bitcast %1 to [[TYPE]]
   // ==>
   //    %2 = @some_function
-  for (auto UI = Prepare->use_begin(), UE = Prepare->use_end(); UI != UE;) {
+  for (Use &U : llvm::make_early_inc_range(Prepare->uses())) {
     // Look for bitcasts back to the original function type.
-    auto *Cast = dyn_cast<BitCastInst>((UI++)->getUser());
+    auto *Cast = dyn_cast<BitCastInst>(U.getUser());
     if (!Cast || Cast->getType() != Fn->getType())
       continue;
 
@@ -2019,10 +2041,9 @@ static void replacePrepare(CallInst *Prepare, CallGraph &CG) {
   //    %2 = bitcast %1 to [[TYPE]]
   // ==>
   //    %2 = @some_function
-  for (auto UI = Prepare->use_begin(), UE = Prepare->use_end();
-         UI != UE; ) {
+  for (Use &U : llvm::make_early_inc_range(Prepare->uses())) {
     // Look for bitcasts back to the original function type.
-    auto *Cast = dyn_cast<BitCastInst>((UI++)->getUser());
+    auto *Cast = dyn_cast<BitCastInst>(U.getUser());
     if (!Cast || Cast->getType() != Fn->getType()) continue;
 
     // Check whether the replacement will introduce new direct calls.
@@ -2059,9 +2080,9 @@ static void replacePrepare(CallInst *Prepare, CallGraph &CG) {
 static bool replaceAllPrepares(Function *PrepareFn, LazyCallGraph &CG,
                                LazyCallGraph::SCC &C) {
   bool Changed = false;
-  for (auto PI = PrepareFn->use_begin(), PE = PrepareFn->use_end(); PI != PE;) {
+  for (Use &P : llvm::make_early_inc_range(PrepareFn->uses())) {
     // Intrinsics can only be used in calls.
-    auto *Prepare = cast<CallInst>((PI++)->getUser());
+    auto *Prepare = cast<CallInst>(P.getUser());
     replacePrepare(Prepare, CG, C);
     Changed = true;
   }
@@ -2077,10 +2098,9 @@ static bool replaceAllPrepares(Function *PrepareFn, LazyCallGraph &CG,
 /// switch coroutines, which are lowered in multiple stages).
 static bool replaceAllPrepares(Function *PrepareFn, CallGraph &CG) {
   bool Changed = false;
-  for (auto PI = PrepareFn->use_begin(), PE = PrepareFn->use_end();
-         PI != PE; ) {
+  for (Use &P : llvm::make_early_inc_range(PrepareFn->uses())) {
     // Intrinsics can only be used in calls.
-    auto *Prepare = cast<CallInst>((PI++)->getUser());
+    auto *Prepare = cast<CallInst>(P.getUser());
     replacePrepare(Prepare, CG);
     Changed = true;
   }

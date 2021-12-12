@@ -105,7 +105,7 @@ define i32 @selecti8i32(i8 %a) {
 ; CHECK-NEXT:    v_bfe_i32 v0, v0, 0, 8
 ; CHECK-NEXT:    v_mov_b32_e32 v1, 0x54
 ; CHECK-NEXT:    v_ashrrev_i16 v0, 7, v0
-; CHECK-NEXT:    v_xor_b32_sdwa v0, v1, sext(v0) dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:DWORD src1_sel:WORD_0
+; CHECK-NEXT:    v_xor_b32_sdwa v0, sext(v0), v1 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_0 src1_sel:DWORD
 ; CHECK-NEXT:    s_setpc_b64 s[30:31]
   %c = icmp sgt i8 %a, -1
   %s = select i1 %c, i32 84, i32 -85
@@ -131,7 +131,7 @@ define i32 @icmpasrne(i32 %input, i32 %a, i32 %b) {
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
 ; CHECK-NEXT:    s_waitcnt_vscnt null, 0x0
-; CHECK-NEXT:    v_cmp_lt_i32_e32 vcc_lo, 0, v0
+; CHECK-NEXT:    v_cmp_lt_i32_e32 vcc_lo, -1, v0
 ; CHECK-NEXT:    v_cndmask_b32_e32 v0, v2, v1, vcc_lo
 ; CHECK-NEXT:    s_setpc_b64 s[30:31]
   %sh = ashr i32 %input, 31
