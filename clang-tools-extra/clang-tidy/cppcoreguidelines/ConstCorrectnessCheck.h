@@ -34,6 +34,10 @@ public:
         TransformPointersAsValues(Options.get("TransformPointersAsValues", 0)) {
   }
 
+  // The rules for C and 'const' are different and incompatible for this check.
+  bool isLanguageVersionSupported(const LangOptions &LangOpts) const override {
+    return LangOpts.CPlusPlus;
+  }
   void storeOptions(ClangTidyOptions::OptionMap &Opts) override;
   void registerMatchers(ast_matchers::MatchFinder *Finder) override;
   void check(const ast_matchers::MatchFinder::MatchResult &Result) override;

@@ -46,10 +46,6 @@ void ConstCorrectnessCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
 }
 
 void ConstCorrectnessCheck::registerMatchers(MatchFinder *Finder) {
-  // The rules for C and 'const' are different and incompatible for this check.
-  if (!getLangOpts().CPlusPlus)
-    return;
-
   const auto ConstType = hasType(isConstQualified());
   const auto ConstReference = hasType(references(isConstQualified()));
   const auto RValueReference = hasType(
@@ -113,7 +109,7 @@ void ConstCorrectnessCheck::check(const MatchFinder::MatchResult &Result) {
   /// shall only deduplicate warnings for variables that are not instantiation
   /// dependent. Variables like 'int x = 42;' in a template that can become
   /// const emit multiple warnings otherwise.
-  const bool IsNormalVariableInTemplate = Function->isTemplateInstantiation();
+  bool IsNormalVariableInTemplate = Function->isTemplateInstantiation();
   if (IsNormalVariableInTemplate &&
       TemplateDiagnosticsCache.contains(Variable->getBeginLoc()))
     return;

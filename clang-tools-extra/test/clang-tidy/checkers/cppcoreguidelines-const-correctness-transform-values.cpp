@@ -103,7 +103,7 @@ void vector_usage() {
 
 void range_for() {
   int np_local0[2] = {1, 2};
-  int *np_local3[2] = {&np_local0[0], &np_local0[1]};
+  int *const np_local3[2] = {&np_local0[0], &np_local0[1]};
   // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'np_local3' of type 'int *[2]' can be declared 'const'
   // CHECK-FIXES: const
   for (int *non_const_ptr : np_local3) {
@@ -111,19 +111,20 @@ void range_for() {
   }
 }
 
-void casts() {
+void decltype_declaration() {
   decltype(sizeof(void *)) p_local0 = 42;
   // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'decltype(sizeof(void *))'
   // CHECK-FIXES: const
 }
 
-// taken from http://www.cplusplus.com/reference/type_traits/integral_constant/
-template <typename T, T v>
+// Taken from libcxx/include/type_traits and improved readability.
+template <class Tp, Tp v>
 struct integral_constant {
-  static constexpr T value = v;
-  using value_type = T;
-  using type = integral_constant<T, v>;
-  constexpr operator T() { return v; }
+  static constexpr const Tp value = v;
+  using value_type = Tp;
+  using type = integral_constant;
+  constexpr operator value_type() const noexcept { return value; }
+  constexpr value_type operator()() const noexcept { return value; }
 };
 
 template <typename T>
@@ -136,12 +137,11 @@ struct not_integral : integral_constant<bool, false> {};
 template <>
 struct not_integral<double> : integral_constant<bool, true> {};
 
-// taken from http://www.cplusplus.com/reference/type_traits/enable_if/
-template <bool Cond, typename T = void>
+template <bool, typename Tp = void>
 struct enable_if {};
 
-template <typename T>
-struct enable_if<true, T> { using type = T; };
+template <typename Tp>
+struct enable_if<true, Tp> { using type = Tp; };
 
 template <typename T>
 struct TMPClass {
@@ -165,4 +165,7 @@ void meta_type() {
   // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local1' of type 'TMPClass<double>' can be declared 'const'
   // CHECK-FIXES: const
   p_local1.alwaysConst();
+
+  TMPClass<double> p_local2; // Don't attempt to make this const
+  p_local2.sometimesConst();
 }

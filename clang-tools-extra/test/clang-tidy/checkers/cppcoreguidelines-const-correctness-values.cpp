@@ -552,13 +552,14 @@ void ternary_operator() {
   *np_local8 = 42;
 }
 
-// taken from http://www.cplusplus.com/reference/type_traits/integral_constant/
-template <typename T, T v>
+// Taken from libcxx/include/type_traits and improved readability.
+template <class Tp, Tp v>
 struct integral_constant {
-  static constexpr T value = v;
-  using value_type = T;
-  using type = integral_constant<T, v>;
-  constexpr operator T() { return v; }
+  static constexpr const Tp value = v;
+  using value_type = Tp;
+  using type = integral_constant;
+  constexpr operator value_type() const noexcept { return value; }
+  constexpr value_type operator()() const noexcept { return value; }
 };
 
 template <typename T>
@@ -571,12 +572,11 @@ struct not_integral : integral_constant<bool, false> {};
 template <>
 struct not_integral<double> : integral_constant<bool, true> {};
 
-// taken from http://www.cplusplus.com/reference/type_traits/enable_if/
-template <bool Cond, typename T = void>
+template <bool, typename Tp = void>
 struct enable_if {};
 
-template <typename T>
-struct enable_if<true, T> { using type = T; };
+template <typename Tp>
+struct enable_if<true, Tp> { using type = Tp; };
 
 template <typename T>
 struct TMPClass {

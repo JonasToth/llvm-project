@@ -93,9 +93,9 @@ Options
     // *pointer_variable = 44;
     // pointer_variable = nullptr;
 
-.. option:: TransformValues (default = 0)
+.. option:: TransformValues (default = 1)
 
-  **Experimental** Provides fixit-hints for value types that automatically adds ``const``
+  Provides fixit-hints for value types that automatically adds ``const``
 
   .. code-block:: c++
     
@@ -105,9 +105,9 @@ Options
     int result = value * 3;
     result -= 10;
 
-.. option:: TransformReferences (default = 0)
+.. option:: TransformReferences (default = 1)
 
-  **Experimental** Provides fixit-hints for reference types that automatically adds ``const``
+  Provides fixit-hints for reference types that automatically adds ``const``
 
   .. code-block:: c++
     
@@ -123,8 +123,8 @@ Options
 
 .. option:: TransformPointersAsValues (default = 0)
 
-  **Experimental** Provides fixit-hints for pointers if their pointee is not changed. This does not
-  analyze if the value-pointed-to is unchanged!
+  Provides fixit-hints for pointers if their pointee is not changed. This does not analyze if the
+  value-pointed-to is unchanged!
 
   Requires 'WarnPointersAsValues' to be 1.
 
