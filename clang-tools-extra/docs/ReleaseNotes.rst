@@ -105,6 +105,11 @@ New checks
   Finds potentially incorrect calls to ``memcmp()`` based on properties of the
   arguments.
 
+- New :doc:`cppcoreguidelines-const-correctness
+  <clang-tidy/checks/cppcoreguidelines-const-correctness>` check.
+
+  Detects unmodified local variables and suggest adding ``const`` if the transformation is possible.
+
 - New :doc:`cppcoreguidelines-virtual-class-destructor
   <clang-tidy/checks/cppcoreguidelines-virtual-class-destructor>` check.
 
@@ -120,11 +125,6 @@ New checks
 
   Finds cases where code could use ``data()`` rather than the address of the
   element at index 0 in a container.
-
-- New :doc:`cppcoreguidelines-const-correctness
-  <clang-tidy/checks/cppcoreguidelines-const-correctness>` check.
-
-  Detects unmodified local variables and suggest adding ``const`` if the transformation is possible.
 
 - New :doc:`readability-identifier-length
   <clang-tidy/checks/readability-identifier-length>` check.
