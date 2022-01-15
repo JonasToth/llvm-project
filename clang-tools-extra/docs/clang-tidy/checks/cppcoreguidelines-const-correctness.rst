@@ -14,13 +14,13 @@ but used to create a non-const handle that might escape the scope are not diagno
 as potential ``const``.
 
 .. code-block:: c++
-  
+
   // Declare a variable, which is not ``const`` ...
   int i = 42;
   // but use it as read-only. This means that `i` can be declared ``const``.
   int result = i * i;
 
-The check can analyzes values, pointers and references but not pointees:
+The check can analyzes values, pointers and references but not (yet) pointees:
 
 .. code-block:: c++
 
@@ -43,15 +43,19 @@ The automatic code transformation is only applied to variables that are declared
 declarations. You may want to prepare your code base with
 `readability-isolate-declaration <readability-isolate-declaration.html>`_ first.
 
+Note that there is the check
+`cppcoreguidelines-avoid-non-const-global-variables <cppcoreguidelines-avoid-non-const-global-variables.html>`_
+to enforce ``const`` correctness on all globals.
+
 Known Limitations
 -----------------
 
 The check will not analyze templated variables or variables that are instantiation dependent.
-Different instantiations can result in different ``const`` correctness properties and it is
-not possible to find all instantiations of a template. It might be used differently in an
+Different instantiations can result in different ``const`` correctness properties and in general it
+is not possible to find all instantiations of a template. It might be used differently in an
 independent translation unit.
 
-Pointees can not be analyzed for constness yet. That means that the following code:
+Pointees can not be analyzed for constness yet. The following code is shows this limitation.
 
 .. code-block:: c++
 
@@ -81,24 +85,24 @@ Options
 .. option:: WarnPointersAsValues (default = 0)
 
   This option enables the suggestion for ``const`` of the pointer itself.
-  Pointer values have two possibilities to be ``const``, the pointer itself
-  and the value pointing to. 
+  Pointer values have two possibilities to be ``const``, the pointer
+  and the value pointing to.
 
   .. code-block:: c++
 
     const int value = 42;
     const int * const pointer_variable = &value;
-    
+
     // The following operations are forbidden for `pointer_variable`.
     // *pointer_variable = 44;
     // pointer_variable = nullptr;
 
 .. option:: TransformValues (default = 1)
 
-  Provides fixit-hints for value types that automatically adds ``const``
+  Provides fixit-hints for value types that automatically adds ``const`` if its a single declaration.
 
   .. code-block:: c++
-    
+
     // Emits a hint for 'value' to become 'const int value = 42;'.
     int value = 42;
     // Result is modified later in its life-time. No diagnostic and fixit hint will be emitted.
@@ -107,10 +111,11 @@ Options
 
 .. option:: TransformReferences (default = 1)
 
-  Provides fixit-hints for reference types that automatically adds ``const``
+  Provides fixit-hints for reference types that automatically adds ``const`` if its a single
+  declaration.
 
   .. code-block:: c++
-    
+
     // This variable could still be a constant. But because there is a non-const reference to
     // it, it can not be transformed (yet).
     int value = 42;
@@ -129,7 +134,7 @@ Options
   Requires 'WarnPointersAsValues' to be 1.
 
   .. code-block:: c++
-    
+
     int value = 42;
     // Emits a hint that 'ptr_value' may become 'int *const ptr_value = &value' because its pointee
     // is not changed.
