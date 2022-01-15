@@ -197,12 +197,12 @@ def SparseTensor_LexInsertOp : SparseTensor_Op<"lex_insert", []>,
     Arguments<(ins AnyTensor:$tensor,
                StridedMemRefRankOf<[Index], [1]>:$indices,
                AnyType:$value)> {
-  string summary = "Inserts a value into given sparse tensor in lexicograph index order";
+  string summary = "Inserts a value into given sparse tensor in lexicographical index order";
   string description = [{
     Inserts the given value at given indices into the underlying sparse
     storage format of the given tensor with the given indices. This
     operation can only be applied when a tensor materializes unintialized
-    with an `init` operation, the insertions occur in strict lexicographic
+    with an `init` operation, the insertions occur in strict lexicographical
     index order, and the final tensor is constructed with a `tensor`
     operation that has the `hasInserts` attribute set.
 
@@ -239,7 +239,7 @@ def SparseTensor_ExpandOp : SparseTensor_Op<"expand", []>,
     dimension (e.g. a full row for matrices). The added array and count are used
     to store new indices when a false value is encountered in the filled array.
     All arrays should be allocated before the loop (possibly even shared between
-    loops in a future optimization) so that their *dense* intitialization can be
+    loops in a future optimization) so that their *dense* initialization can be
     amortized over many iterations. Setting and resetting the dense arrays in
     the loop nest itself is kept *sparse* by only iterating over set elements
     through an indirection using the added array, so that the operations are

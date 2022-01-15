@@ -985,6 +985,9 @@ defm hip_fp32_correctly_rounded_divide_sqrt : BoolFOption<"hip-fp32-correctly-ro
   BothFlags<[], " that single precision floating-point divide and sqrt used in "
   "the program source are correctly rounded (HIP device compilation only)">>,
   ShouldParseIf<hip.KeyPath>;
+def hipspv_pass_plugin_EQ : Joined<["--"], "hipspv-pass-plugin=">,
+  Group<Link_Group>, MetaVarName<"<dsopath>">,
+  HelpText<"path to a pass plugin for HIP to SPIR-V passes.">;
 defm gpu_allow_device_init : BoolFOption<"gpu-allow-device-init",
   LangOpts<"GPUAllowDeviceInit">, DefaultFalse,
   PosFlag<SetTrue, [CC1Option], "Allow">, NegFlag<SetFalse, [], "Don't allow">,
@@ -1073,6 +1076,8 @@ def emit_interface_stubs : Flag<["-"], "emit-interface-stubs">, Flags<[CC1Option
 def emit_merged_ifs : Flag<["-"], "emit-merged-ifs">,
   Flags<[CC1Option]>, Group<Action_Group>,
   HelpText<"Generate Interface Stub Files, emit merged text not binary.">;
+def end_no_unused_arguments : Flag<["--"], "end-no-unused-arguments">, Flags<[CoreOption]>,
+  HelpText<"Start emitting warnings for unused driver arguments">;
 def interface_stub_version_EQ : JoinedOrSeparate<["-"], "interface-stub-version=">, Flags<[CC1Option]>;
 def exported__symbols__list : Separate<["-"], "exported_symbols_list">;
 def e : JoinedOrSeparate<["-"], "e">, Flags<[LinkerInput]>, Group<Link_Group>;
@@ -1131,6 +1136,13 @@ defm autolink : BoolFOption<"autolink",
   CodeGenOpts<"Autolink">, DefaultTrue,
   NegFlag<SetFalse, [CC1Option], "Disable generation of linker directives for automatic library linking">,
   PosFlag<SetTrue>>;
+
+// In the future this option will be supported by other offloading
+// languages and accept other values such as CPU/GPU architectures,
+// offload kinds and target aliases.
+def offload_EQ : CommaJoined<["--"], "offload=">, Flags<[NoXarchOption]>,
+  HelpText<"Specify comma-separated list of offloading target triples"
+           " (HIP only)">;
 
 // C++ Coroutines TS
 defm coroutines_ts : BoolFOption<"coroutines-ts",
@@ -1657,6 +1669,13 @@ def sanitize_address_destructor_EQ
       NormalizedValuesScope<"llvm::AsanDtorKind">,
       NormalizedValues<["None", "Global"]>,
       MarshallingInfoEnum<CodeGenOpts<"SanitizeAddressDtor">, "Global">;
+defm sanitize_memory_param_retval
+  : BoolOption<"f", "sanitize-memory-param-retval",
+      CodeGenOpts<"SanitizeMemoryParamRetval">,
+      DefaultFalse,
+      PosFlag<SetTrue, [CC1Option], "Enable">, NegFlag<SetFalse, [], "Disable">,
+      BothFlags<[], " detection of uninitialized parameters and return values">>,
+    Group<f_clang_Group>;
 // Note: This flag was introduced when it was necessary to distinguish between
 //       ABI for correct codegen.  This is no longer needed, but the flag is
 //       not removed since targeting either ABI will behave the same.
@@ -2392,7 +2411,8 @@ def fomit_frame_pointer : Flag<["-"], "fomit-frame-pointer">, Group<f_Group>;
 def fopenmp : Flag<["-"], "fopenmp">, Group<f_Group>, Flags<[CC1Option, NoArgumentUnused, FlangOption, FC1Option]>,
   HelpText<"Parse OpenMP pragmas and generate parallel code.">;
 def fno_openmp : Flag<["-"], "fno-openmp">, Group<f_Group>, Flags<[NoArgumentUnused]>;
-def fopenmp_version_EQ : Joined<["-"], "fopenmp-version=">, Group<f_Group>, Flags<[CC1Option, NoArgumentUnused]>;
+def fopenmp_version_EQ : Joined<["-"], "fopenmp-version=">, Group<f_Group>, Flags<[CC1Option, NoArgumentUnused]>,
+  HelpText<"Set OpenMP version (e.g. 45 for OpenMP 4.5, 50 for OpenMP 5.0). Default value is 50.">;
 defm openmp_extensions: BoolFOption<"openmp-extensions",
   LangOpts<"OpenMPExtensions">, DefaultTrue,
   PosFlag<SetTrue, [CC1Option, NoArgumentUnused],
@@ -2433,13 +2453,13 @@ def fopenmp_target_debug : Flag<["-"], "fopenmp-target-debug">, Group<f_Group>, 
   HelpText<"Enable debugging in the OpenMP offloading device RTL">;
 def fno_openmp_target_debug : Flag<["-"], "fno-openmp-target-debug">, Group<f_Group>, Flags<[NoArgumentUnused]>;
 def fopenmp_target_debug_EQ : Joined<["-"], "fopenmp-target-debug=">, Group<f_Group>, Flags<[CC1Option, NoArgumentUnused, HelpHidden]>;
-def fopenmp_assume_teams_oversubscription : Flag<["-"], "fopenmp-assume-teams-oversubscription">, 
+def fopenmp_assume_teams_oversubscription : Flag<["-"], "fopenmp-assume-teams-oversubscription">,
   Group<f_Group>, Flags<[CC1Option, NoArgumentUnused, HelpHidden]>;
-def fopenmp_assume_threads_oversubscription : Flag<["-"], "fopenmp-assume-threads-oversubscription">, 
+def fopenmp_assume_threads_oversubscription : Flag<["-"], "fopenmp-assume-threads-oversubscription">,
   Group<f_Group>, Flags<[CC1Option, NoArgumentUnused, HelpHidden]>;
-def fno_openmp_assume_teams_oversubscription : Flag<["-"], "fno-openmp-assume-teams-oversubscription">, 
+def fno_openmp_assume_teams_oversubscription : Flag<["-"], "fno-openmp-assume-teams-oversubscription">,
   Group<f_Group>, Flags<[CC1Option, NoArgumentUnused, HelpHidden]>;
-def fno_openmp_assume_threads_oversubscription : Flag<["-"], "fno-openmp-assume-threads-oversubscription">, 
+def fno_openmp_assume_threads_oversubscription : Flag<["-"], "fno-openmp-assume-threads-oversubscription">,
   Group<f_Group>, Flags<[CC1Option, NoArgumentUnused, HelpHidden]>;
 defm openmp_target_new_runtime: BoolFOption<"openmp-target-new-runtime",
   LangOpts<"OpenMPTargetNewRuntime">, DefaultTrue,
@@ -3606,6 +3626,7 @@ def mcheck_zero_division : Flag<["-"], "mcheck-zero-division">,
                            Group<m_mips_Features_Group>;
 def mno_check_zero_division : Flag<["-"], "mno-check-zero-division">,
                               Group<m_mips_Features_Group>;
+def mfix4300 : Flag<["-"], "mfix4300">, Group<m_mips_Features_Group>;
 def mcompact_branches_EQ : Joined<["-"], "mcompact-branches=">,
                            Group<m_mips_Features_Group>;
 def mbranch_likely : Flag<["-"], "mbranch-likely">, Group<m_Group>,
@@ -3763,6 +3784,8 @@ def nobuiltininc : Flag<["-"], "nobuiltininc">, Flags<[CC1Option, CoreOption]>,
   MarshallingInfoNegativeFlag<HeaderSearchOpts<"UseBuiltinIncludes">>;
 def nogpuinc : Flag<["-"], "nogpuinc">, HelpText<"Do not add include paths for CUDA/HIP and"
   " do not include the default CUDA/HIP wrapper headers">;
+def nohipwrapperinc : Flag<["-"], "nohipwrapperinc">,
+  HelpText<"Do not include the default HIP wrapper headers and include paths">;
 def : Flag<["-"], "nocudainc">, Alias<nogpuinc>;
 def nogpulib : Flag<["-"], "nogpulib">,
   HelpText<"Do not link device library for CUDA/HIP device compilation">;
@@ -3789,6 +3812,11 @@ def o : JoinedOrSeparate<["-"], "o">, Flags<[NoXarchOption, RenderAsInput,
   CC1Option, CC1AsOption, FC1Option, FlangOption]>,
   HelpText<"Write output to <file>">, MetaVarName<"<file>">,
   MarshallingInfoString<FrontendOpts<"OutputFile">>;
+def object_file_name_EQ : Joined<["-"], "object-file-name=">, Flags<[CC1Option, CC1AsOption, CoreOption]>,
+  HelpText<"Set the output <file> for debug infos">, MetaVarName<"<file>">,
+  MarshallingInfoString<CodeGenOpts<"ObjectFilenameForDebug">>;
+def object_file_name : Separate<["-"], "object-file-name">, Flags<[CC1Option, CC1AsOption, CoreOption]>,
+    Alias<object_file_name_EQ>;
 def pagezero__size : JoinedOrSeparate<["-"], "pagezero_size">;
 def pass_exit_codes : Flag<["-", "--"], "pass-exit-codes">, Flags<[Unsupported]>;
 def pedantic_errors : Flag<["-", "--"], "pedantic-errors">, Group<pedantic_Group>, Flags<[CC1Option]>,
@@ -3894,6 +3922,8 @@ def shared : Flag<["-", "--"], "shared">, Group<Link_Group>;
 def single__module : Flag<["-"], "single_module">;
 def specs_EQ : Joined<["-", "--"], "specs=">, Group<Link_Group>;
 def specs : Separate<["-", "--"], "specs">, Flags<[Unsupported]>;
+def start_no_unused_arguments : Flag<["--"], "start-no-unused-arguments">, Flags<[CoreOption]>,
+  HelpText<"Don't emit warnings about unused arguments for the following arguments">;
 def static_libgcc : Flag<["-"], "static-libgcc">;
 def static_libstdcxx : Flag<["-"], "static-libstdc++">;
 def static : Flag<["-", "--"], "static">, Group<Link_Group>, Flags<[NoArgumentUnused]>;
@@ -4142,6 +4172,8 @@ def mv67t : Flag<["-"], "mv67t">, Group<m_hexagon_Features_Group>,
   Alias<mcpu_EQ>, AliasArgs<["hexagonv67t"]>;
 def mv68 : Flag<["-"], "mv68">, Group<m_hexagon_Features_Group>,
   Alias<mcpu_EQ>, AliasArgs<["hexagonv68"]>;
+def mv69 : Flag<["-"], "mv69">, Group<m_hexagon_Features_Group>,
+  Alias<mcpu_EQ>, AliasArgs<["hexagonv69"]>;
 def mhexagon_hvx : Flag<["-"], "mhvx">, Group<m_hexagon_Features_HVX_Group>,
   HelpText<"Enable Hexagon Vector eXtensions">;
 def mhexagon_hvx_EQ : Joined<["-"], "mhvx=">,
@@ -4153,6 +4185,18 @@ def mno_hexagon_hvx : Flag<["-"], "mno-hvx">,
 def mhexagon_hvx_length_EQ : Joined<["-"], "mhvx-length=">,
   Group<m_hexagon_Features_HVX_Group>, HelpText<"Set Hexagon Vector Length">,
   Values<"64B,128B">;
+def mhexagon_hvx_qfloat : Flag<["-"], "mhvx-qfloat">,
+  Group<m_hexagon_Features_HVX_Group>,
+  HelpText<"Enable Hexagon HVX QFloat instructions">;
+def mno_hexagon_hvx_qfloat : Flag<["-"], "mno-hvx-qfloat">,
+  Group<m_hexagon_Features_HVX_Group>,
+  HelpText<"Disable Hexagon HVX QFloat instructions">;
+def mhexagon_hvx_ieee_fp : Flag<["-"], "mhvx-ieee-fp">,
+  Group<m_hexagon_Features_Group>,
+  HelpText<"Enable Hexagon HVX IEEE floating-point">;
+def mno_hexagon_hvx_ieee_fp : Flag<["-"], "mno-hvx-ieee-fp">,
+  Group<m_hexagon_Features_Group>,
+  HelpText<"Disable Hexagon HVX IEEE floating-point">;
 def ffixed_r19: Flag<["-"], "ffixed-r19">,
   HelpText<"Reserve register r19 (Hexagon only)">;
 def mmemops : Flag<["-"], "mmemops">, Group<m_hexagon_Features_Group>,

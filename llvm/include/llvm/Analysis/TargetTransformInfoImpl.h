@@ -267,6 +267,15 @@ public:
     return false;
   }
 
+  bool forceScalarizeMaskedGather(VectorType *DataType, Align Alignment) const {
+    return false;
+  }
+
+  bool forceScalarizeMaskedScatter(VectorType *DataType,
+                                   Align Alignment) const {
+    return false;
+  }
+
   bool isLegalMaskedCompressStore(Type *DataType) const { return false; }
 
   bool isLegalMaskedExpandLoad(Type *DataType) const { return false; }
@@ -708,9 +717,8 @@ public:
             Callee->getFnAttribute("target-features"));
   }
 
-  bool areFunctionArgsABICompatible(const Function *Caller,
-                                    const Function *Callee,
-                                    SmallPtrSetImpl<Argument *> &Args) const {
+  bool areTypesABICompatible(const Function *Caller, const Function *Callee,
+                             const ArrayRef<Type *> &Types) const {
     return (Caller->getFnAttribute("target-cpu") ==
             Callee->getFnAttribute("target-cpu")) &&
            (Caller->getFnAttribute("target-features") ==
@@ -777,6 +785,8 @@ public:
   unsigned getGISelRematGlobalCost() const { return 1; }
 
   bool supportsScalableVectors() const { return false; }
+
+  bool enableScalableVectorization() const { return false; }
 
   bool hasActiveVectorLength(unsigned Opcode, Type *DataType,
                              Align Alignment) const {
@@ -1051,7 +1061,20 @@ public:
     }
     case Instruction::Load: {
       auto *LI = cast<LoadInst>(U);
-      return TargetTTI->getMemoryOpCost(Opcode, U->getType(), LI->getAlign(),
+      Type *LoadType = U->getType();
+      // If there is a non-register sized type, the cost estimation may expand
+      // it to be several instructions to load into multiple registers on the
+      // target.  But, if the only use of the load is a trunc instruction to a
+      // register sized type, the instruction selector can combine these
+      // instructions to be a single load.  So, in this case, we use the
+      // destination type of the trunc instruction rather than the load to
+      // accurately estimate the cost of this load instruction.
+      if (CostKind == TTI::TCK_CodeSize && LI->hasOneUse() &&
+          !LoadType->isVectorTy()) {    
+        if (const TruncInst *TI = dyn_cast<TruncInst>(*LI->user_begin()))
+          LoadType = TI->getDestTy();
+      }
+      return TargetTTI->getMemoryOpCost(Opcode, LoadType, LI->getAlign(),
                                         LI->getPointerAddressSpace(),
                                         CostKind, I);
     }

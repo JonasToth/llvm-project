@@ -104,10 +104,8 @@ class DynTypedNodeList;
 class Expr;
 enum class FloatModeKind;
 class GlobalDecl;
-class ItaniumMangleContext;
 class MangleContext;
 class MangleNumberingContext;
-class MaterializeTemporaryExpr;
 class MemberSpecializationInfo;
 class Module;
 struct MSGuidDeclParts;
@@ -126,7 +124,6 @@ class ObjCTypeParamDecl;
 class OMPTraitInfo;
 struct ParsedTargetAttr;
 class Preprocessor;
-class Stmt;
 class StoredDeclsMap;
 class TargetAttr;
 class TargetInfo;
@@ -248,6 +245,7 @@ class ASTContext : public RefCountedBase<ASTContext> {
   mutable llvm::ContextualFoldingSet<TemplateSpecializationType, ASTContext&>
     TemplateSpecializationTypes;
   mutable llvm::FoldingSet<ParenType> ParenTypes;
+  mutable llvm::FoldingSet<UsingType> UsingTypes;
   mutable llvm::FoldingSet<ElaboratedType> ElaboratedTypes;
   mutable llvm::FoldingSet<DependentNameType> DependentNameTypes;
   mutable llvm::ContextualFoldingSet<DependentTemplateSpecializationType,
@@ -1555,6 +1553,9 @@ public:
     return getTypeDeclTypeSlow(Decl);
   }
 
+  QualType getUsingType(const UsingShadowDecl *Found,
+                        QualType Underlying) const;
+
   /// Return the unique reference to the type for the specified
   /// typedef-name decl.
   QualType getTypedefType(const TypedefNameDecl *Decl,
@@ -1563,6 +1564,9 @@ public:
   QualType getRecordType(const RecordDecl *Decl) const;
 
   QualType getEnumType(const EnumDecl *Decl) const;
+
+  QualType
+  getUnresolvedUsingType(const UnresolvedUsingTypenameDecl *Decl) const;
 
   QualType getInjectedClassNameType(CXXRecordDecl *Decl, QualType TST) const;
 
@@ -2723,13 +2727,9 @@ public:
   QualType getFloatingTypeOfSizeWithinDomain(QualType typeSize,
                                              QualType typeDomain) const;
 
-  unsigned getTargetAddressSpace(QualType T) const {
-    return getTargetAddressSpace(T.getQualifiers());
-  }
+  unsigned getTargetAddressSpace(QualType T) const;
 
-  unsigned getTargetAddressSpace(Qualifiers Q) const {
-    return getTargetAddressSpace(Q.getAddressSpace());
-  }
+  unsigned getTargetAddressSpace(Qualifiers Q) const;
 
   unsigned getTargetAddressSpace(LangAS AS) const;
 

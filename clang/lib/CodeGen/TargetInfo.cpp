@@ -431,7 +431,7 @@ static Address emitMergePHI(CodeGenFunction &CGF,
   PHI->addIncoming(Addr1.getPointer(), Block1);
   PHI->addIncoming(Addr2.getPointer(), Block2);
   CharUnits Align = std::min(Addr1.getAlignment(), Addr2.getAlignment());
-  return Address(PHI, Align);
+  return Address(PHI, Addr1.getElementType(), Align);
 }
 
 TargetCodeGenInfo::~TargetCodeGenInfo() = default;
@@ -855,19 +855,19 @@ public:
     if (const auto *FD = dyn_cast_or_null<FunctionDecl>(D)) {
       if (const auto *Attr = FD->getAttr<WebAssemblyImportModuleAttr>()) {
         llvm::Function *Fn = cast<llvm::Function>(GV);
-        llvm::AttrBuilder B;
+        llvm::AttrBuilder B(GV->getContext());
         B.addAttribute("wasm-import-module", Attr->getImportModule());
         Fn->addFnAttrs(B);
       }
       if (const auto *Attr = FD->getAttr<WebAssemblyImportNameAttr>()) {
         llvm::Function *Fn = cast<llvm::Function>(GV);
-        llvm::AttrBuilder B;
+        llvm::AttrBuilder B(GV->getContext());
         B.addAttribute("wasm-import-name", Attr->getImportName());
         Fn->addFnAttrs(B);
       }
       if (const auto *Attr = FD->getAttr<WebAssemblyExportNameAttr>()) {
         llvm::Function *Fn = cast<llvm::Function>(GV);
-        llvm::AttrBuilder B;
+        llvm::AttrBuilder B(GV->getContext());
         B.addAttribute("wasm-export-name", Attr->getExportName());
         Fn->addFnAttrs(B);
       }
@@ -1606,7 +1606,7 @@ static bool isSIMDVectorType(ASTContext &Context, QualType Ty) {
 static bool isRecordWithSIMDVectorType(ASTContext &Context, QualType Ty) {
   const RecordType *RT = Ty->getAs<RecordType>();
   if (!RT)
-    return 0;
+    return false;
   const RecordDecl *RD = RT->getDecl();
 
   // If this is a C++ record, check the bases first.
@@ -4034,7 +4034,7 @@ static Address EmitX86_64VAArgFromMemory(CodeGenFunction &CGF,
   CGF.Builder.CreateStore(overflow_arg_area, overflow_arg_area_p);
 
   // AMD64-ABI 3.5.7p5: Step 11. Return the fetched type.
-  return Address(Res, Align);
+  return Address(Res, LTy, Align);
 }
 
 Address X86_64ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
@@ -4147,7 +4147,7 @@ Address X86_64ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
     RegAddr = CGF.Builder.CreateElementBitCast(Tmp, LTy);
   } else if (neededInt) {
     RegAddr = Address(CGF.Builder.CreateGEP(CGF.Int8Ty, RegSaveArea, gp_offset),
-                      CharUnits::fromQuantity(8));
+                      CGF.Int8Ty, CharUnits::fromQuantity(8));
     RegAddr = CGF.Builder.CreateElementBitCast(RegAddr, LTy);
 
     // Copy to a temporary if necessary to ensure the appropriate alignment.
@@ -4165,7 +4165,7 @@ Address X86_64ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
 
   } else if (neededSSE == 1) {
     RegAddr = Address(CGF.Builder.CreateGEP(CGF.Int8Ty, RegSaveArea, fp_offset),
-                      CharUnits::fromQuantity(16));
+                      CGF.Int8Ty, CharUnits::fromQuantity(16));
     RegAddr = CGF.Builder.CreateElementBitCast(RegAddr, LTy);
   } else {
     assert(neededSSE == 2 && "Invalid number of needed registers!");
@@ -4177,7 +4177,7 @@ Address X86_64ABIInfo::EmitVAArg(CodeGenFunction &CGF, Address VAListAddr,
     // all the SSE registers to the RSA.
     Address RegAddrLo = Address(CGF.Builder.CreateGEP(CGF.Int8Ty, RegSaveArea,
                                                       fp_offset),
-                                CharUnits::fromQuantity(16));
+                                CGF.Int8Ty, CharUnits::fromQuantity(16));
     Address RegAddrHi =
       CGF.Builder.CreateConstInBoundsByteGEP(RegAddrLo,
                                              CharUnits::fromQuantity(16));
@@ -6414,7 +6414,7 @@ public:
     // AAPCS guarantees that sp will be 8-byte aligned on any public interface,
     // however this is not necessarily true on taking any interrupt. Instruct
     // the backend to perform a realignment as part of the function prologue.
-    llvm::AttrBuilder B;
+    llvm::AttrBuilder B(Fn->getContext());
     B.addStackAlignmentAttr(8);
     Fn->addFnAttrs(B);
   }
@@ -8693,7 +8693,7 @@ Address HexagonABIInfo::EmitVAArgForHexagonLinux(CodeGenFunction &CGF,
                             llvm::ConstantInt::get(CGF.Int32Ty, ArgSize),
                             "__new_saved_reg_area_pointer");
 
-  llvm::Value *UsingStack = 0;
+  llvm::Value *UsingStack = nullptr;
   UsingStack = CGF.Builder.CreateICmpSGT(__new_saved_reg_area_pointer,
                                          __saved_reg_area_end_pointer);
 
@@ -9362,7 +9362,9 @@ AMDGPUTargetCodeGenInfo::getGlobalVarAddressSpace(CodeGenModule &CGM,
   if (AddrSpace != LangAS::Default)
     return AddrSpace;
 
-  if (CGM.isTypeConstant(D->getType(), false)) {
+  // Only promote to address space 4 if VarDecl has constant initialization.
+  if (CGM.isTypeConstant(D->getType(), false) &&
+      D->hasConstantInitialization()) {
     if (auto ConstAS = CGM.getTarget().getConstantAddressSpace())
       return ConstAS.getValue();
   }
@@ -11415,7 +11417,7 @@ TargetCodeGenInfo::createEnqueuedBlockKernel(CodeGenFunction &CGF,
   auto &C = CGF.getLLVMContext();
   std::string Name = Invoke->getName().str() + "_kernel";
   auto *FT = llvm::FunctionType::get(llvm::Type::getVoidTy(C), ArgTys, false);
-  auto *F = llvm::Function::Create(FT, llvm::GlobalValue::InternalLinkage, Name,
+  auto *F = llvm::Function::Create(FT, llvm::GlobalValue::ExternalLinkage, Name,
                                    &CGF.CGM.getModule());
   auto IP = CGF.Builder.saveIP();
   auto *BB = llvm::BasicBlock::Create(C, "entry", F);

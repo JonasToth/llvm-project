@@ -1017,14 +1017,15 @@ def int_codeview_annotation : DefaultAttrsIntrinsic<[], [llvm_metadata_ty],
 
 //===------------------------ Trampoline Intrinsics -----------------------===//
 //
-def int_init_trampoline : Intrinsic<[],
-                                    [llvm_ptr_ty, llvm_ptr_ty, llvm_ptr_ty],
-                                    [IntrArgMemOnly, NoCapture<ArgIndex<0>>]>,
-                                    GCCBuiltin<"__builtin_init_trampoline">;
+def int_init_trampoline : DefaultAttrsIntrinsic<
+    [], [llvm_ptr_ty, llvm_ptr_ty, llvm_ptr_ty],
+    [IntrArgMemOnly, NoCapture<ArgIndex<0>>, WriteOnly<ArgIndex<0>>,
+     ReadNone<ArgIndex<1>>, ReadNone<ArgIndex<2>>]>,
+    GCCBuiltin<"__builtin_init_trampoline">;
 
-def int_adjust_trampoline : Intrinsic<[llvm_ptr_ty], [llvm_ptr_ty],
-                                      [IntrReadMem, IntrArgMemOnly]>,
-                                      GCCBuiltin<"__builtin_adjust_trampoline">;
+def int_adjust_trampoline : DefaultAttrsIntrinsic<
+    [llvm_ptr_ty], [llvm_ptr_ty], [IntrReadMem, IntrArgMemOnly]>,
+    GCCBuiltin<"__builtin_adjust_trampoline">;
 
 //===------------------------ Overflow Intrinsics -------------------------===//
 //
@@ -1501,6 +1502,12 @@ let IntrProperties =
 }
 // Shuffles.
 def int_vp_select : DefaultAttrsIntrinsic<[ llvm_anyvector_ty ],
+                              [ LLVMScalarOrSameVectorWidth<0, llvm_i1_ty>,
+                                LLVMMatchType<0>,
+                                LLVMMatchType<0>,
+                                llvm_i32_ty]>;
+
+def int_vp_merge : DefaultAttrsIntrinsic<[ llvm_anyvector_ty ],
                               [ LLVMScalarOrSameVectorWidth<0, llvm_i1_ty>,
                                 LLVMMatchType<0>,
                                 LLVMMatchType<0>,

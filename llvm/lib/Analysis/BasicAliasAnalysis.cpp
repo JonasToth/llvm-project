@@ -779,7 +779,7 @@ FunctionModRefBehavior BasicAAResult::getModRefBehavior(const CallBase *Call) {
   // than that.
   if (Call->onlyReadsMemory())
     Min = FMRB_OnlyReadsMemory;
-  else if (Call->doesNotReadMemory())
+  else if (Call->onlyWritesMemory())
     Min = FMRB_OnlyWritesMemory;
 
   if (Call->onlyAccessesArgMemory())
@@ -812,7 +812,7 @@ FunctionModRefBehavior BasicAAResult::getModRefBehavior(const Function *F) {
   // If the function declares it only reads memory, go with that.
   if (F->onlyReadsMemory())
     Min = FMRB_OnlyReadsMemory;
-  else if (F->doesNotReadMemory())
+  else if (F->onlyWritesMemory())
     Min = FMRB_OnlyWritesMemory;
 
   if (F->onlyAccessesArgMemory())
@@ -972,7 +972,7 @@ ModRefInfo BasicAAResult::getModRefInfo(const CallBase *Call,
         continue;
       }
       // Operand aliases 'Object' but call only writes into it.
-      if (Call->doesNotReadMemory(OperandNo)) {
+      if (Call->onlyWritesMemory(OperandNo)) {
         Result = setMod(Result);
         continue;
       }
@@ -994,20 +994,6 @@ ModRefInfo BasicAAResult::getModRefInfo(const CallBase *Call,
         return ModRefInfo::NoModRef;
       return IsMustAlias ? setMust(Result) : clearMust(Result);
     }
-  }
-
-  // If the call is malloc/calloc like, we can assume that it doesn't
-  // modify any IR visible value.  This is only valid because we assume these
-  // routines do not read values visible in the IR.  TODO: Consider special
-  // casing realloc and strdup routines which access only their arguments as
-  // well.  Or alternatively, replace all of this with inaccessiblememonly once
-  // that's implemented fully.
-  if (isMallocOrCallocLikeFn(Call, &TLI)) {
-    // Be conservative if the accessed pointer may alias the allocation -
-    // fallback to the generic handling below.
-    if (getBestAAResults().alias(MemoryLocation::getBeforeOrAfter(Call), Loc,
-                                 AAQI) == AliasResult::NoAlias)
-      return ModRefInfo::NoModRef;
   }
 
   // The semantics of memcpy intrinsics either exactly overlap or do not
@@ -1248,8 +1234,8 @@ AliasResult BasicAAResult::aliasGEP(
     else
       GCD = APIntOps::GreatestCommonDivisor(GCD, ScaleForGCD.abs());
 
-    ConstantRange CR =
-        computeConstantRange(Index.Val.V, true, &AC, Index.CxtI);
+    ConstantRange CR = computeConstantRange(Index.Val.V, /* ForSigned */ false,
+                                            true, &AC, Index.CxtI);
     KnownBits Known =
         computeKnownBits(Index.Val.V, DL, 0, &AC, Index.CxtI, DT);
     CR = CR.intersectWith(
@@ -1699,6 +1685,7 @@ AliasResult BasicAAResult::aliasCheckRecursive(
       return Result;
   } else if (const GEPOperator *GV2 = dyn_cast<GEPOperator>(V2)) {
     AliasResult Result = aliasGEP(GV2, V2Size, V1, V1Size, O2, O1, AAQI);
+    Result.swap();
     if (Result != AliasResult::MayAlias)
       return Result;
   }
@@ -1709,6 +1696,7 @@ AliasResult BasicAAResult::aliasCheckRecursive(
       return Result;
   } else if (const PHINode *PN = dyn_cast<PHINode>(V2)) {
     AliasResult Result = aliasPHI(PN, V2Size, V1, V1Size, AAQI);
+    Result.swap();
     if (Result != AliasResult::MayAlias)
       return Result;
   }
@@ -1719,6 +1707,7 @@ AliasResult BasicAAResult::aliasCheckRecursive(
       return Result;
   } else if (const SelectInst *S2 = dyn_cast<SelectInst>(V2)) {
     AliasResult Result = aliasSelect(S2, V2Size, V1, V1Size, AAQI);
+    Result.swap();
     if (Result != AliasResult::MayAlias)
       return Result;
   }

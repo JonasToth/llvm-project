@@ -126,7 +126,7 @@ public:
 protected:
   /// Initialize the printer with no internal implementation. In this case, all
   /// virtual methods of this class must be overriden.
-  AsmPrinter() : impl(nullptr) {}
+  AsmPrinter() {}
 
 private:
   AsmPrinter(const AsmPrinter &) = delete;
@@ -141,7 +141,7 @@ private:
   virtual LogicalResult printAlias(Type type);
 
   /// The internal implementation of the printer.
-  Impl *impl;
+  Impl *impl{nullptr};
 };
 
 template <typename AsmPrinterT>
@@ -1348,11 +1348,6 @@ public:
   /// OpAsmInterface.td#getAsmResultNames for usage details and documentation.
   virtual void getAsmResultNames(Operation *op,
                                  OpAsmSetValueNameFn setNameFn) const {}
-
-  /// Get a special name to use when printing the entry block arguments of the
-  /// region contained by an operation in this dialect.
-  virtual void getAsmBlockArgumentNames(Block *block,
-                                        OpAsmSetValueNameFn setNameFn) const {}
 };
 } // namespace mlir
 
