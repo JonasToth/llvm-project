@@ -77,7 +77,7 @@ void direct_class_access() {
 
 void class_access_array() {
   ConstNonConstClass p_local0[2];
-  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'ConstNonConstClass [2]' can be declared 'const'
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'ConstNonConstClass[2]' can be declared 'const'
   // CHECK-FIXES: const
   p_local0[0].constMethod();
 }
@@ -97,16 +97,20 @@ struct MyVector {
 
 void vector_usage() {
   double p_local0[10] = {0., 1., 2., 3., 4., 5., 6., 7., 8., 9.};
-  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'double [10]' can be declared 'const'
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'double[10]' can be declared 'const'
   // CHECK-FIXES: const
 }
 
 void range_for() {
   int np_local0[2] = {1, 2};
-  int *const np_local3[2] = {&np_local0[0], &np_local0[1]};
-  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'np_local3' of type 'int *[2]' can be declared 'const'
-  // CHECK-FIXES: const
-  for (int *non_const_ptr : np_local3) {
+  // The transformation is not possible because the range-for-loop mutates the array content.
+  int *const np_local1[2] = {&np_local0[0], &np_local0[1]};
+  for (int *non_const_ptr : np_local1) {
+    *non_const_ptr = 45;
+  }
+
+  int *np_local2[2] = {&np_local0[0], &np_local0[1]};
+  for (int *non_const_ptr : np_local2) {
     *non_const_ptr = 45;
   }
 }

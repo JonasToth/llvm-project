@@ -12,10 +12,19 @@
 bool global;
 char np_global = 0; // globals can't be known to be const
 
+// FIXME: 'static' globals are not matched right now. They could be analyzed but aren't right now.
+static int p_static_global = 42;
+
 namespace foo {
 int scoped;
 float np_scoped = 1; // namespace variables are like globals
 } // namespace foo
+
+// FIXME: Similary to 'static' globals, anonymous globals are not matched and analyzed.
+namespace {
+int np_anonymous_global;
+int p_anonymous_global = 43;
+} // namespace
 
 // Lambdas should be ignored, because they do not follow the normal variable
 // semantic (e.g. the type is only known to the compiler).
@@ -317,7 +326,7 @@ void class_access_array() {
   np_local0[1].nonConstMethod();
 
   ConstNonConstClass p_local0[2];
-  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'ConstNonConstClass [2]' can be declared 'const'
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'ConstNonConstClass[2]' can be declared 'const'
   p_local0[0].constMethod();
   np_local0[1].constMethod();
 }
@@ -376,7 +385,7 @@ void vector_usage() {
   np_local1[5] = 42.;
 
   double p_local0[10] = {0., 1., 2., 3., 4., 5., 6., 7., 8., 9.};
-  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'double [10]' can be declared 'const'
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'double[10]' can be declared 'const'
   double p_local1 = p_local0[5];
   // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local1' of type 'double' can be declared 'const'
 
@@ -421,23 +430,23 @@ void handle_from_array() {
 
   // Constant handles are ok
   double p_local1[10] = {0., 1., 2., 3., 4., 5., 6., 7., 8., 9.};
-  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local1' of type 'double [10]' can be declared 'const'
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local1' of type 'double[10]' can be declared 'const'
   const double *p_local2 = &p_local1[2]; // Could be `const double *const`, but warning deactivated by default
 
   double p_local3[10] = {0., 1., 2., 3., 4., 5., 6., 7., 8., 9.};
-  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local3' of type 'double [10]' can be declared 'const'
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local3' of type 'double[10]' can be declared 'const'
   const double &const_ref = p_local3[2];
 
   double p_local4[10] = {0., 1., 2., 3., 4., 5., 6., 7., 8., 9.};
-  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local4' of type 'double [10]' can be declared 'const'
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local4' of type 'double[10]' can be declared 'const'
   const double *const_ptr;
   const_ptr = &p_local4[2];
 
   double p_local5[10] = {0., 1., 2., 3., 4., 5., 6., 7., 8., 9.};
-  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local5' of type 'double [10]' can be declared 'const'
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local5' of type 'double[10]' can be declared 'const'
   const_handle(p_local5[2]);
   double p_local6[10] = {0., 1., 2., 3., 4., 5., 6., 7., 8., 9.};
-  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local6' of type 'double [10]' can be declared 'const'
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local6' of type 'double[10]' can be declared 'const'
   const_handle(&p_local6[2]);
 }
 
@@ -457,11 +466,7 @@ void range_for() {
     non_const_ref = 44;
   }
 
-  // FIXME the warning message is suboptimal. It could be defined as
-  // `int *const np_local3[2]` because the pointers are not reseated.
-  // But this is not easily deducable from the warning.
   int *np_local3[2] = {&np_local0[0], &np_local0[1]};
-  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'np_local3' of type 'int *[2]' can be declared 'const'
   for (int *non_const_ptr : np_local3) {
     *non_const_ptr = 45;
   }
@@ -473,13 +478,13 @@ void range_for() {
   }
 
   int p_local0[2] = {1, 2};
-  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'int [2]' can be declared 'const'
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'int[2]' can be declared 'const'
   for (int value : p_local0) {
     // CHECK-MESSAGES: [[@LINE-1]]:8: warning: variable 'value' of type 'int' can be declared 'const'
   }
 
   int p_local1[2] = {1, 2};
-  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local1' of type 'int [2]' can be declared 'const'
+  // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local1' of type 'int[2]' can be declared 'const'
   for (const int &const_ref : p_local1) {
   }
 
