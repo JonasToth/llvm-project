@@ -26,13 +26,13 @@ class ConstCorrectnessCheck : public ClangTidyCheck {
 public:
   ConstCorrectnessCheck(StringRef Name, ClangTidyContext *Context)
       : ClangTidyCheck(Name, Context),
-        AnalyzeValues(Options.get("AnalyzeValues", 1)),
-        AnalyzeReferences(Options.get("AnalyzeReferences", 1)),
-        WarnPointersAsValues(Options.get("WarnPointersAsValues", 0)),
-        TransformValues(Options.get("TransformValues", 1)),
-        TransformReferences(Options.get("TransformReferences", 1)),
-        TransformPointersAsValues(Options.get("TransformPointersAsValues", 0)) {
-  }
+        AnalyzeValues(Options.get("AnalyzeValues", true)),
+        AnalyzeReferences(Options.get("AnalyzeReferences", true)),
+        WarnPointersAsValues(Options.get("WarnPointersAsValues", false)),
+        TransformValues(Options.get("TransformValues", true)),
+        TransformReferences(Options.get("TransformReferences", true)),
+        TransformPointersAsValues(
+            Options.get("TransformPointersAsValues", false)) {}
 
   // The rules for C and 'const' are different and incompatible for this check.
   bool isLanguageVersionSupported(const LangOptions &LangOpts) const override {
