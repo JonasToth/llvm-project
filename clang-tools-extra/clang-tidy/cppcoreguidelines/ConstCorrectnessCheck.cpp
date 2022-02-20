@@ -24,7 +24,7 @@ namespace {
 // FIXME: This matcher exists in some other code-review as well.
 // It should probably move to ASTMatchers.
 AST_MATCHER(VarDecl, isLocal) { return Node.isLocalVarDecl(); }
-AST_MATCHER_P(DeclStmt, containsDeclaration2,
+AST_MATCHER_P(DeclStmt, containsAnyDeclaration,
               ast_matchers::internal::Matcher<Decl>, InnerMatcher) {
   return ast_matchers::internal::matchesFirstInPointerRange(
       InnerMatcher, Node.decl_begin(), Node.decl_end(), Finder, Builder);
@@ -79,13 +79,12 @@ void ConstCorrectnessCheck::registerMatchers(MatchFinder *Finder) {
   // shall be run.
   const auto FunctionScope =
       functionDecl(
-          hasBody(
-              compoundStmt(
-                  findAll(declStmt(allOf(containsDeclaration2(
-                                             LocalValDecl.bind("local-value")),
-                                         unless(has(decompositionDecl()))))
-                              .bind("decl-stmt")))
-                  .bind("scope")))
+          hasBody(compoundStmt(
+                      findAll(declStmt(containsAnyDeclaration(
+                                           LocalValDecl.bind("local-value")),
+                                       unless(has(decompositionDecl())))
+                                  .bind("decl-stmt")))
+                      .bind("scope")))
           .bind("function-decl");
 
   Finder->addMatcher(FunctionScope, this);
@@ -157,32 +156,27 @@ void ConstCorrectnessCheck::check(const MatchFinder::MatchResult &Result) {
     return;
 
   using namespace utils::fixit;
-  using llvm::Optional;
   if (VC == VariableCategory::Value && TransformValues) {
-    if (Optional<FixItHint> Fix = addQualifierToVarDecl(
-            *Variable, *Result.Context, DeclSpec::TQ_const,
-            QualifierTarget::Value, QualifierPolicy::Right)) {
-      Diag << *Fix;
-      // FIXME: Add '{}' for default initialization if no user-defined default
-      // constructor exists and there is no initializer.
-    }
+    Diag << addQualifierToVarDecl(*Variable, *Result.Context,
+                                  DeclSpec::TQ_const, QualifierTarget::Value,
+                                  QualifierPolicy::Right);
+    // FIXME: Add '{}' for default initialization if no user-defined default
+    // constructor exists and there is no initializer.
     return;
   }
 
   if (VC == VariableCategory::Reference && TransformReferences) {
-    if (Optional<FixItHint> Fix = addQualifierToVarDecl(
-            *Variable, *Result.Context, DeclSpec::TQ_const,
-            QualifierTarget::Value, QualifierPolicy::Right))
-      Diag << *Fix;
+    Diag << addQualifierToVarDecl(*Variable, *Result.Context,
+                                  DeclSpec::TQ_const, QualifierTarget::Value,
+                                  QualifierPolicy::Right);
     return;
   }
 
   if (VC == VariableCategory::Pointer) {
     if (WarnPointersAsValues && TransformPointersAsValues) {
-      if (Optional<FixItHint> Fix = addQualifierToVarDecl(
-              *Variable, *Result.Context, DeclSpec::TQ_const,
-              QualifierTarget::Value, QualifierPolicy::Right))
-        Diag << *Fix;
+      Diag << addQualifierToVarDecl(*Variable, *Result.Context,
+                                    DeclSpec::TQ_const, QualifierTarget::Value,
+                                    QualifierPolicy::Right);
     }
     return;
   }

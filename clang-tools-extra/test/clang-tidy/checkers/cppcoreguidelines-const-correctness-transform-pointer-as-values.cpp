@@ -1,8 +1,8 @@
 // RUN: %check_clang_tidy %s cppcoreguidelines-const-correctness %t \
 // RUN: -config='{CheckOptions: \
-// RUN:  [{key: "cppcoreguidelines-const-correctness.AnalyzeValues", value: 1},\
-// RUN:   {key: "cppcoreguidelines-const-correctness.WarnPointersAsValues", value: 1}, \
-// RUN:   {key: "cppcoreguidelines-const-correctness.TransformPointersAsValues", value: 1},\
+// RUN:  [{key: "cppcoreguidelines-const-correctness.AnalyzeValues", value: true},\
+// RUN:   {key: "cppcoreguidelines-const-correctness.WarnPointersAsValues", value: true}, \
+// RUN:   {key: "cppcoreguidelines-const-correctness.TransformPointersAsValues", value: true},\
 // RUN:  ]}' -- -fno-delayed-template-parsing
 
 void potential_const_pointer() {
