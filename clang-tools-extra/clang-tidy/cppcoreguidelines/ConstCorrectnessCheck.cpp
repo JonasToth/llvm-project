@@ -27,7 +27,8 @@ AST_MATCHER(VarDecl, isLocal) { return Node.isLocalVarDecl(); }
 AST_MATCHER_P(DeclStmt, containsAnyDeclaration,
               ast_matchers::internal::Matcher<Decl>, InnerMatcher) {
   return ast_matchers::internal::matchesFirstInPointerRange(
-      InnerMatcher, Node.decl_begin(), Node.decl_end(), Finder, Builder);
+             InnerMatcher, Node.decl_begin(), Node.decl_end(), Finder,
+             Builder) != Node.decl_end();
 }
 AST_MATCHER(ReferenceType, isSpelledAsLValue) {
   return Node.isSpelledAsLValue();
@@ -79,12 +80,13 @@ void ConstCorrectnessCheck::registerMatchers(MatchFinder *Finder) {
   // shall be run.
   const auto FunctionScope =
       functionDecl(
-          hasBody(compoundStmt(
-                      findAll(declStmt(containsAnyDeclaration(
-                                           LocalValDecl.bind("local-value")),
-                                       unless(has(decompositionDecl())))
-                                  .bind("decl-stmt")))
-                      .bind("scope")))
+          hasBody(
+              compoundStmt(forEachDescendant(
+                               declStmt(containsAnyDeclaration(
+                                            LocalValDecl.bind("local-value")),
+                                        unless(has(decompositionDecl())))
+                                   .bind("decl-stmt")))
+                  .bind("scope")))
           .bind("function-decl");
 
   Finder->addMatcher(FunctionScope, this);
@@ -98,10 +100,14 @@ void ConstCorrectnessCheck::check(const MatchFinder::MatchResult &Result) {
   const auto *Variable = Result.Nodes.getNodeAs<VarDecl>("local-value");
   const auto *Function = Result.Nodes.getNodeAs<FunctionDecl>("function-decl");
 
+#if 0
+  // FIXME: Remove this section if there are no crashes after the iterator-fix.
+  //
   // There have been crashes on 'Variable == nullptr', even though the matcher
   // is not conditional. This comes probably from 'findAll'-matching.
   if (!Variable || !LocalScope)
     return;
+#endif
 
   /// If the variable was declared in a template it might be analyzed multiple
   /// times. Only one of those instantiations shall emit a warning. NOTE: This
