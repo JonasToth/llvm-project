@@ -177,10 +177,12 @@ bool DerivedTypeSpec::IsForwardReferenced() const {
   return typeSymbol_.get<DerivedTypeDetails>().isForwardReferenced();
 }
 
-bool DerivedTypeSpec::HasDefaultInitialization() const {
+bool DerivedTypeSpec::HasDefaultInitialization(bool ignoreAllocatable) const {
   DirectComponentIterator components{*this};
-  return bool{std::find_if(components.begin(), components.end(),
-      [&](const Symbol &component) { return IsInitialized(component); })};
+  return bool{std::find_if(
+      components.begin(), components.end(), [&](const Symbol &component) {
+        return IsInitialized(component, true, ignoreAllocatable);
+      })};
 }
 
 bool DerivedTypeSpec::HasDestruction() const {
@@ -197,17 +199,6 @@ bool DerivedTypeSpec::HasDestruction() const {
 ParamValue *DerivedTypeSpec::FindParameter(SourceName target) {
   return const_cast<ParamValue *>(
       const_cast<const DerivedTypeSpec *>(this)->FindParameter(target));
-}
-
-// Objects of derived types might be assignment compatible if they are equal
-// with respect to everything other than their instantiated type parameters
-// and their constant instantiated type parameters have the same values.
-bool DerivedTypeSpec::MightBeAssignmentCompatibleWith(
-    const DerivedTypeSpec &that) const {
-  if (!RawEquals(that)) {
-    return false;
-  }
-  return AreTypeParamCompatible(*this, that);
 }
 
 class InstantiateHelper {

@@ -996,19 +996,36 @@ ModRefInfo BasicAAResult::getModRefInfo(const CallBase *Call,
     }
   }
 
-  // The semantics of memcpy intrinsics either exactly overlap or do not
-  // overlap, i.e., source and destination of any given memcpy are either
-  // no-alias or must-alias.
-  if (auto *Inst = dyn_cast<AnyMemCpyInst>(Call)) {
+  // If the call is malloc/calloc like, we can assume that it doesn't
+  // modify any IR visible value.  This is only valid because we assume these
+  // routines do not read values visible in the IR.  TODO: Consider special
+  // casing realloc and strdup routines which access only their arguments as
+  // well.  Or alternatively, replace all of this with inaccessiblememonly once
+  // that's implemented fully.
+  if (isMallocOrCallocLikeFn(Call, &TLI)) {
+    // Be conservative if the accessed pointer may alias the allocation -
+    // fallback to the generic handling below.
+    if (getBestAAResults().alias(MemoryLocation::getBeforeOrAfter(Call), Loc,
+                                 AAQI) == AliasResult::NoAlias)
+      return ModRefInfo::NoModRef;
+  }
+
+  // Ideally, there should be no need to special case for memcpy/memove
+  // intrinsics here since general machinery (based on memory attributes) should
+  // already handle it just fine. Unfortunately, it doesn't due to deficiency in
+  // operand bundles support. At the moment it's not clear if complexity behind
+  // enhancing general mechanism worths it.
+  // TODO: Consider improving operand bundles support in general mechanism.
+  if (auto *Inst = dyn_cast<AnyMemTransferInst>(Call)) {
     AliasResult SrcAA =
         getBestAAResults().alias(MemoryLocation::getForSource(Inst), Loc, AAQI);
     AliasResult DestAA =
         getBestAAResults().alias(MemoryLocation::getForDest(Inst), Loc, AAQI);
     // It's also possible for Loc to alias both src and dest, or neither.
     ModRefInfo rv = ModRefInfo::NoModRef;
-    if (SrcAA != AliasResult::NoAlias)
+    if (SrcAA != AliasResult::NoAlias || Call->hasReadingOperandBundles())
       rv = setRef(rv);
-    if (DestAA != AliasResult::NoAlias)
+    if (DestAA != AliasResult::NoAlias || Call->hasClobberingOperandBundles())
       rv = setMod(rv);
     return rv;
   }

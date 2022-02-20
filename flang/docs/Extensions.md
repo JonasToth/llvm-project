@@ -131,14 +131,19 @@ end
   that can hold them, if one exists.
 * BOZ literals can be used as INTEGER values in contexts where the type is
   unambiguous: the right hand sides of assigments and initializations
-  of INTEGER entities, and as actual arguments to a few intrinsic functions
-  (ACHAR, BTEST, CHAR).  BOZ literals are interpreted as default INTEGER
+  of INTEGER entities, as actual arguments to a few intrinsic functions
+  (ACHAR, BTEST, CHAR), and as actual arguments of references to
+  procedures with explicit interfaces whose corresponding dummy
+  argument has a numeric type to which the BOZ literal may be
+  converted.  BOZ literals are interpreted as default INTEGER only
   when they appear as the first items of array constructors with no
   explicit type.  Otherwise, they generally cannot be used if the type would
   not be known (e.g., `IAND(X'1',X'2')`).
 * BOZ literals can also be used as REAL values in some contexts where the
   type is unambiguous, such as initializations of REAL parameters.
-* EQUIVALENCE of numeric and character sequences (a ubiquitous extension)
+* EQUIVALENCE of numeric and character sequences (a ubiquitous extension),
+  as well as of sequences of non-default kinds of numeric types
+  with each other.
 * Values for whole anonymous parent components in structure constructors
   (e.g., `EXTENDEDTYPE(PARENTTYPE(1,2,3))` rather than `EXTENDEDTYPE(1,2,3)`
    or `EXTENDEDTYPE(PARENTTYPE=PARENTTYPE(1,2,3))`).
@@ -204,6 +209,14 @@ end
   the component appears in a derived type with `SEQUENCE`.
   (This case should probably be an exception to constraint C740 in
   the standard.)
+* Format expressions that have type but are not character and not
+  integer scalars are accepted so long as they are simply contiguous.
+  This legacy extension supports pre-Fortran'77 usage in which
+  variables initialized in DATA statements with Hollerith literals
+  as modifiable formats.
+* At runtime, `NAMELIST` input will skip over `NAMELIST` groups
+  with other names, and will treat text before and between groups
+  as if they were comment lines, even if not begun with `!`.
 
 ### Extensions supported when enabled by options
 

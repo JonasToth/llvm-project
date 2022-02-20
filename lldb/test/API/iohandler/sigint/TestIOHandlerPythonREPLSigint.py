@@ -25,7 +25,7 @@ class TestCase(PExpectTest):
     # under ASAN on a loaded machine..
     @skipIfAsan
     @skipIfWindows
-    @skipIf(oslist=["linux"], archs=["arm"])
+    @skipIf(oslist=["linux"], archs=["arm", "aarch64"])
     def test_while_evaluating_code(self):
         """ Tests SIGINT handling while Python code is being evaluated."""
         self.start_python_repl()
@@ -58,7 +58,7 @@ class TestCase(PExpectTest):
     @skipIfAsan
     # FIXME: On Linux the Python code that reads from stdin seems to block until
     # it has finished reading a line before handling any queued signals.
-    @skipIfLinux
+    @skipIf(hostoslist=['linux'])
     @skipIfWindows
     def test_while_waiting_on_input(self):
         """ Tests SIGINT handling while the REPL is waiting on input from
