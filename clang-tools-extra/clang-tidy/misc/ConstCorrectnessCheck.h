@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_CPPCOREGUIDELINES_CONSTCORRECTNESSCHECK_H
-#define LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_CPPCOREGUIDELINES_CONSTCORRECTNESSCHECK_H
+#ifndef LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_MISC_CONSTCORRECTNESSCHECK_H
+#define LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_MISC_CONSTCORRECTNESSCHECK_H
 
 #include "../ClangTidyCheck.h"
 #include "clang/Analysis/Analyses/ExprMutationAnalyzer.h"
@@ -16,7 +16,7 @@
 namespace clang {
 namespace tidy {
 
-namespace cppcoreguidelines {
+namespace misc {
 
 /// This check warns on variables which could be declared const but are not.
 ///
@@ -58,8 +58,8 @@ private:
   const bool TransformPointersAsValues;
 };
 
-} // namespace cppcoreguidelines
+} // namespace misc
 } // namespace tidy
 } // namespace clang
 
-#endif // LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_CPPCOREGUIDELINES_CONSTCORRECTNESSCHECK_H
+#endif // LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_MISC_CONSTCORRECTNESSCHECK_H

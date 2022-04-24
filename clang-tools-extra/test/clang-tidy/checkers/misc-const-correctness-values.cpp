@@ -1,8 +1,8 @@
-// RUN: %check_clang_tidy %s cppcoreguidelines-const-correctness %t -- \
+// RUN: %check_clang_tidy %s misc-const-correctness %t -- \
 // RUN:   -config="{CheckOptions: [\
-// RUN:   {key: 'cppcoreguidelines-const-correctness.TransformValues', value: true}, \
-// RUN:   {key: 'cppcoreguidelines-const-correctness.WarnPointersAsValues', value: false}, \
-// RUN:   {key: 'cppcoreguidelines-const-correctness.TransformPointersAsValues', value: false}, \
+// RUN:   {key: 'misc-const-correctness.TransformValues', value: true}, \
+// RUN:   {key: 'misc-const-correctness.WarnPointersAsValues', value: false}, \
+// RUN:   {key: 'misc-const-correctness.TransformPointersAsValues', value: false}, \
 // RUN:   ]}" -- -fno-delayed-template-parsing
 
 // ------- Provide test samples for primitive builtins ---------

@@ -1,7 +1,7 @@
-// RUN: %check_clang_tidy %s cppcoreguidelines-const-correctness %t \
+// RUN: %check_clang_tidy %s misc-const-correctness %t \
 // RUN: -config='{CheckOptions: \
-// RUN:  [{key: "cppcoreguidelines-const-correctness.AnalyzeValues", value: true},\
-// RUN:   {key: "cppcoreguidelines-const-correctness.WarnPointersAsValues", value: true}]}' \
+// RUN:  [{key: "misc-const-correctness.AnalyzeValues", value: true},\
+// RUN:   {key: "misc-const-correctness.WarnPointersAsValues", value: true}]}' \
 // RUN: -- -fno-delayed-template-parsing
 
 void potential_const_pointer() {

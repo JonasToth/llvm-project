@@ -18,7 +18,7 @@ using namespace clang::ast_matchers;
 
 namespace clang {
 namespace tidy {
-namespace cppcoreguidelines {
+namespace misc {
 
 namespace {
 // FIXME: This matcher exists in some other code-review as well.
@@ -196,6 +196,6 @@ void ConstCorrectnessCheck::registerScope(const CompoundStmt *LocalScope,
         std::make_unique<ExprMutationAnalyzer>(*LocalScope, *Context)));
 }
 
-} // namespace cppcoreguidelines
+} // namespace misc
 } // namespace tidy
 } // namespace clang
