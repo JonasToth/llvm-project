@@ -29,7 +29,6 @@ add_clang_library(clangTidyCppCoreGuidelinesModule
   VirtualClassDestructorCheck.cpp
 
   LINK_LIBS
-  clangAnalysis
   clangTidy
   clangTidyMiscModule
   clangTidyModernizeModule

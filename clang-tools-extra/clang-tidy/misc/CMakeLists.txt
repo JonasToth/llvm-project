@@ -24,6 +24,7 @@ add_clang_library(clangTidyMiscModule
   UnusedUsingDeclsCheck.cpp
 
   LINK_LIBS
+  clangAnalysis
   clangTidy
   clangTidyUtils
 
