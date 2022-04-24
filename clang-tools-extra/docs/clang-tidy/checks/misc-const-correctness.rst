@@ -4,7 +4,7 @@ misc-const-correctness
 ======================
 
 This check implements detection of local variables which could be declared as
-``const``, but are not. Declaring variables as ``const`` is required by many
+``const``, but are not. Declaring variables as ``const`` is required or recommended by many
 coding guidelines, such as:
 `CppCoreGuidelines ES.25 <https://github.com/isocpp/CppCoreGuidelines/blob/master/CppCoreGuidelines.md#es25-declare-an-object-const-or-constexpr-unless-you-want-to-modify-its-value-later-on>`_
 and `AUTOSAR C++14 Rule A7-1-1 (6.7.1 Specifiers) <https://www.autosar.org/fileadmin/user_upload/standards/adaptive/17-03/AUTOSAR_RS_CPP14Guidelines.pdf>`_.
