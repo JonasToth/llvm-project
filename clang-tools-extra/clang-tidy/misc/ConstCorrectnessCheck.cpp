@@ -100,15 +100,6 @@ void ConstCorrectnessCheck::check(const MatchFinder::MatchResult &Result) {
   const auto *Variable = Result.Nodes.getNodeAs<VarDecl>("local-value");
   const auto *Function = Result.Nodes.getNodeAs<FunctionDecl>("function-decl");
 
-#if 0
-  // FIXME: Remove this section if there are no crashes after the iterator-fix.
-  //
-  // There have been crashes on 'Variable == nullptr', even though the matcher
-  // is not conditional. This comes probably from 'findAll'-matching.
-  if (!Variable || !LocalScope)
-    return;
-#endif
-
   /// If the variable was declared in a template it might be analyzed multiple
   /// times. Only one of those instantiations shall emit a warning. NOTE: This
   /// shall only deduplicate warnings for variables that are not instantiation

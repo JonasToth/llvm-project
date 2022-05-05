@@ -24,14 +24,14 @@ void some_function(double, wchar_t);
 void some_function(double np_arg0, wchar_t np_arg1) {
   int p_local0 = 2;
   // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'int' can be declared 'const'
-  // CHECK-FIXES: const
+  // CHECK-FIXES: int const p_local0 = 2;
 }
 
 void nested_scopes() {
   {
     int p_local1 = 42;
     // CHECK-MESSAGES: [[@LINE-1]]:5: warning: variable 'p_local1' of type 'int' can be declared 'const'
-    // CHECK-FIXES: const
+    // CHECK-FIXES: int const p_local1 = 42;
   }
 }
 
@@ -40,7 +40,7 @@ void define_locals(T np_arg0, T &np_arg1, int np_arg2) {
   T np_local0 = 0;
   int p_local1 = 42;
   // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local1' of type 'int' can be declared 'const'
-  // CHECK-FIXES: const
+  // CHECK-FIXES: int const p_local1 = 42;
 }
 
 void template_instantiation() {
@@ -71,14 +71,14 @@ struct ConstNonConstClass {
 void direct_class_access() {
   ConstNonConstClass p_local0;
   // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'ConstNonConstClass' can be declared 'const'
-  // CHECK-FIXES: const
+  // CHECK-FIXES: ConstNonConstClass const p_local0;
   p_local0.constMethod();
 }
 
 void class_access_array() {
   ConstNonConstClass p_local0[2];
   // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'ConstNonConstClass[2]' can be declared 'const'
-  // CHECK-FIXES: const
+  // CHECK-FIXES: ConstNonConstClass const p_local0[2];
   p_local0[0].constMethod();
 }
 
@@ -98,7 +98,7 @@ struct MyVector {
 void vector_usage() {
   double p_local0[10] = {0., 1., 2., 3., 4., 5., 6., 7., 8., 9.};
   // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'double[10]' can be declared 'const'
-  // CHECK-FIXES: const
+  // CHECK-FIXES: double const p_local0[10] = {0., 1., 2., 3., 4., 5., 6., 7., 8., 9.};
 }
 
 void range_for() {
@@ -118,7 +118,7 @@ void range_for() {
 void decltype_declaration() {
   decltype(sizeof(void *)) p_local0 = 42;
   // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'decltype(sizeof(void *))'
-  // CHECK-FIXES: const
+  // CHECK-FIXES: decltype(sizeof(void *)) const p_local0 = 42;
 }
 
 // Taken from libcxx/include/type_traits and improved readability.
@@ -161,13 +161,13 @@ struct TMPClass {
 void meta_type() {
   TMPClass<int> p_local0;
   // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'TMPClass<int>' can be declared 'const'
-  // CHECK-FIXES: const
+  // CHECK-FIXES: TMPClass<int> const p_local0;
   p_local0.alwaysConst();
   p_local0.sometimesConst();
 
   TMPClass<double> p_local1;
   // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local1' of type 'TMPClass<double>' can be declared 'const'
-  // CHECK-FIXES: const
+  // CHECK-FIXES: TMPClass<double> const p_local1;
   p_local1.alwaysConst();
 
   TMPClass<double> p_local2; // Don't attempt to make this const
