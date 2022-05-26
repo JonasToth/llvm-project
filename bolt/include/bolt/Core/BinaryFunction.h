@@ -172,6 +172,9 @@ public:
 
     mutable MCSymbol *FunctionConstantIslandLabel{nullptr};
     mutable MCSymbol *FunctionColdConstantIslandLabel{nullptr};
+
+    // Returns constant island alignment
+    uint16_t getAlignment() const { return sizeof(uint64_t); }
   };
 
   static constexpr uint64_t COUNT_NO_PROFILE =
@@ -663,9 +666,6 @@ private:
   IndirectBranchType processIndirectBranch(MCInst &Instruction, unsigned Size,
                                            uint64_t Offset,
                                            uint64_t &TargetAddress);
-
-  DenseMap<const MCInst *, SmallVector<MCInst *, 4>>
-  computeLocalUDChain(const MCInst *CurInstr);
 
   BinaryFunction &operator=(const BinaryFunction &) = delete;
   BinaryFunction(const BinaryFunction &) = delete;
@@ -1276,6 +1276,9 @@ public:
     case ELF::R_AARCH64_MOVW_UABS_G2:
     case ELF::R_AARCH64_MOVW_UABS_G2_NC:
     case ELF::R_AARCH64_MOVW_UABS_G3:
+    case ELF::R_AARCH64_PREL16:
+    case ELF::R_AARCH64_PREL32:
+    case ELF::R_AARCH64_PREL64:
       Rels[Offset] = Relocation{Offset, Symbol, RelType, Addend, Value};
       return;
     case ELF::R_AARCH64_CALL26:
@@ -1299,10 +1302,11 @@ public:
     case ELF::R_X86_64_32:
     case ELF::R_X86_64_32S:
     case ELF::R_X86_64_64:
+    case ELF::R_X86_64_PC8:
+    case ELF::R_X86_64_PC32:
+    case ELF::R_X86_64_PC64:
       Relocations[Offset] = Relocation{Offset, Symbol, RelType, Addend, Value};
       return;
-    case ELF::R_X86_64_PC32:
-    case ELF::R_X86_64_PC8:
     case ELF::R_X86_64_PLT32:
     case ELF::R_X86_64_GOTPCRELX:
     case ELF::R_X86_64_REX_GOTPCRELX:
@@ -2046,6 +2050,10 @@ public:
     return *std::prev(CodeIter) <= *DataIter;
   }
 
+  uint16_t getConstantIslandAlignment() const {
+    return Islands ? Islands->getAlignment() : 1;
+  }
+
   uint64_t
   estimateConstantIslandSize(const BinaryFunction *OnBehalfOf = nullptr) const {
     if (!Islands)
@@ -2073,9 +2081,13 @@ public:
       Size += NextMarker - *DataIter;
     }
 
-    if (!OnBehalfOf)
-      for (BinaryFunction *ExternalFunc : Islands->Dependency)
+    if (!OnBehalfOf) {
+      for (BinaryFunction *ExternalFunc : Islands->Dependency) {
+        Size = alignTo(Size, ExternalFunc->getConstantIslandAlignment());
         Size += ExternalFunc->estimateConstantIslandSize(this);
+      }
+    }
+
     return Size;
   }
 

@@ -43,6 +43,7 @@ class PlatformSDKTestCase(TestBase):
     @skipUnlessDarwin
     @expectedFailureIfFn(no_debugserver)
     @expectedFailureIfFn(port_not_available)
+    @skipIfRemote
     def test_macos_sdk(self):
         self.build()
 
@@ -57,6 +58,7 @@ class PlatformSDKTestCase(TestBase):
 
         # Create a fake 'SDK' directory.
         test_home = os.path.join(self.getBuildDir(), 'fake_home.noindex')
+        test_home = os.path.realpath(test_home)
         macos_version = platform.mac_ver()[0]
         sdk_dir = os.path.join(test_home, 'Library', 'Developer', 'Xcode',
                                'macOS DeviceSupport', macos_version)

@@ -21,7 +21,6 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
-#include "llvm/IR/Operator.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
@@ -86,6 +85,9 @@ ModulePass *llvm::createGlobalDCEPass() {
 
 /// Returns true if F is effectively empty.
 static bool isEmptyFunction(Function *F) {
+  // Skip external functions.
+  if (F->isDeclaration())
+    return false;
   BasicBlock &Entry = F->getEntryBlock();
   for (auto &I : Entry) {
     if (I.isDebugOrPseudoInst())
@@ -298,7 +300,8 @@ PreservedAnalyses GlobalDCEPass::run(Module &M, ModuleAnalysisManager &MAM) {
   // marked as alive are discarded.
 
   // Remove empty functions from the global ctors list.
-  Changed |= optimizeGlobalCtorsList(M, isEmptyFunction);
+  Changed |= optimizeGlobalCtorsList(
+      M, [](uint32_t, Function *F) { return isEmptyFunction(F); });
 
   // Collect the set of members for each comdat.
   for (Function &F : M)

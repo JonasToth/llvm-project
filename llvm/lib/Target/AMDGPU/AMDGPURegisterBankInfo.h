@@ -16,7 +16,7 @@
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/Register.h"
-#include "llvm/CodeGen/GlobalISel/RegisterBankInfo.h"
+#include "llvm/CodeGen/RegisterBankInfo.h"
 
 #define GET_REGBANK_DECLARATIONS
 #include "AMDGPUGenRegisterBank.inc"
@@ -58,6 +58,9 @@ public:
     iterator_range<MachineBasicBlock::iterator> Range,
     SmallSet<Register, 4> &SGPROperandRegs,
     MachineRegisterInfo &MRI) const;
+
+  Register buildReadFirstLane(MachineIRBuilder &B, MachineRegisterInfo &MRI,
+                              Register Src) const;
 
   bool executeInWaterfallLoop(MachineIRBuilder &B,
                               MachineInstr &MI,

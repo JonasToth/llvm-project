@@ -342,6 +342,7 @@ void Preprocessor::RegisterBuiltinMacros() {
   Ident__TIME__ = RegisterBuiltinMacro(*this, "__TIME__");
   Ident__COUNTER__ = RegisterBuiltinMacro(*this, "__COUNTER__");
   Ident_Pragma  = RegisterBuiltinMacro(*this, "_Pragma");
+  Ident__FLT_EVAL_METHOD__ = RegisterBuiltinMacro(*this, "__FLT_EVAL_METHOD__");
 
   // C++ Standing Document Extensions.
   if (getLangOpts().CPlusPlus)
@@ -1510,7 +1511,7 @@ void Preprocessor::ExpandBuiltinMacro(Token &Tok) {
       } else {
         FN += PLoc.getFilename();
       }
-      getLangOpts().remapPathPrefix(FN);
+      processPathForFileMacro(FN, getLangOpts(), getTargetInfo());
       Lexer::Stringify(FN);
       OS << '"' << FN << '"';
     }
@@ -1574,6 +1575,38 @@ void Preprocessor::ExpandBuiltinMacro(Token &Tok) {
     // Surround the string with " and strip the trailing newline.
     OS << '"' << StringRef(Result).drop_back() << '"';
     Tok.setKind(tok::string_literal);
+  } else if (II == Ident__FLT_EVAL_METHOD__) {
+    // __FLT_EVAL_METHOD__ is set to the default value.
+    if (getTUFPEvalMethod() ==
+        LangOptions::FPEvalMethodKind::FEM_Indeterminable) {
+      // This is possible if `AllowFPReassoc` or `AllowReciprocal` is enabled.
+      // These modes can be triggered via the command line option `-ffast-math`
+      // or via a `pragam float_control`.
+      // __FLT_EVAL_METHOD__ expands to -1.
+      // The `minus` operator is the next token we read from the stream.
+      auto Toks = std::make_unique<Token[]>(1);
+      OS << "-";
+      Tok.setKind(tok::minus);
+      // Push the token `1` to the stream.
+      Token NumberToken;
+      NumberToken.startToken();
+      NumberToken.setKind(tok::numeric_constant);
+      NumberToken.setLiteralData("1");
+      NumberToken.setLength(1);
+      Toks[0] = NumberToken;
+      EnterTokenStream(std::move(Toks), 1, /*DisableMacroExpansion*/ false,
+                       /*IsReinject*/ false);
+    } else {
+      OS << getTUFPEvalMethod();
+      // __FLT_EVAL_METHOD__ expands to a simple numeric value.
+      Tok.setKind(tok::numeric_constant);
+      if (getLastFPEvalPragmaLocation().isValid()) {
+        // The program is ill-formed. The value of __FLT_EVAL_METHOD__ is
+        // altered by the pragma.
+        Diag(Tok, diag::err_illegal_use_of_flt_eval_macro);
+        Diag(getLastFPEvalPragmaLocation(), diag::note_pragma_entered_here);
+      }
+    }
   } else if (II == Ident__COUNTER__) {
     // __COUNTER__ expands to a simple numeric value.
     OS << CounterValue++;
@@ -1607,7 +1640,9 @@ void Preprocessor::ExpandBuiltinMacro(Token &Tok) {
             // usual allocation and deallocation functions. Required by libc++
             return 201802;
           default:
-            return true;
+            return Builtin::evaluateRequiredTargetFeatures(
+                getBuiltinInfo().getRequiredFeatures(II->getBuiltinID()),
+                getTargetInfo().getTargetOpts().FeatureMap);
           }
           return true;
         } else if (II->getTokenID() != tok::identifier ||
@@ -1852,4 +1887,17 @@ void Preprocessor::markMacroAsUsed(MacroInfo *MI) {
   if (MI->isWarnIfUnused() && !MI->isUsed())
     WarnUnusedMacroLocs.erase(MI->getDefinitionLoc());
   MI->setIsUsed(true);
+}
+
+void Preprocessor::processPathForFileMacro(SmallVectorImpl<char> &Path,
+                                           const LangOptions &LangOpts,
+                                           const TargetInfo &TI) {
+  LangOpts.remapPathPrefix(Path);
+  if (LangOpts.UseTargetPathSeparator) {
+    if (TI.getTriple().isOSWindows())
+      llvm::sys::path::make_preferred(
+          Path, llvm::sys::path::Style::windows_backslash);
+    else
+      llvm::sys::path::make_preferred(Path, llvm::sys::path::Style::posix);
+  }
 }

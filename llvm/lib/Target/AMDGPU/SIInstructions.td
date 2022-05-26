@@ -30,6 +30,8 @@ include "SMInstructions.td"
 include "FLATInstructions.td"
 include "BUFInstructions.td"
 include "EXPInstructions.td"
+include "LDSDIRInstructions.td"
+include "VINTERPInstructions.td"
 
 //===----------------------------------------------------------------------===//
 // VINTRP Instructions
@@ -313,6 +315,18 @@ def WAVE_BARRIER : SPseudoInstSI<(outs), (ins),
   let Size = 0;
 }
 
+def SCHED_BARRIER : SPseudoInstSI<(outs), (ins i32imm:$mask),
+  [(int_amdgcn_sched_barrier (i32 timm:$mask))]> {
+  let SchedRW = [];
+  let hasNoSchedulingInfo = 1;
+  let hasSideEffects = 1;
+  let mayLoad = 0;
+  let mayStore = 0;
+  let isConvergent = 1;
+  let FixedSize = 1;
+  let Size = 0;
+}
+
 // SI pseudo instructions. These are used by the CFG structurizer pass
 // and should be lowered to ISA instructions prior to codegen.
 
@@ -487,7 +501,7 @@ def SI_RETURN_TO_EPILOG : SPseudoInstSI <
 
 // Return for returning function calls.
 def SI_RETURN : SPseudoInstSI <
-  (outs), (ins), [],
+  (outs), (ins), [(AMDGPUret_flag)],
   "; return"> {
   let isTerminator = 1;
   let isBarrier = 1;
@@ -520,6 +534,7 @@ def : GCNPat<
 def SI_CALL : SPseudoInstSI <
   (outs SReg_64:$dst), (ins SSrc_b64:$src0, unknown:$callee)> {
   let Size = 4;
+  let FixedSize = 1;
   let isCall = 1;
   let UseNamedOperandTable = 1;
   let SchedRW = [WriteBranch];
@@ -532,6 +547,7 @@ def SI_TCRETURN : SPseudoInstSI <(outs),
   (ins SReg_64:$src0, unknown:$callee, i32imm:$fpdiff),
   [(AMDGPUtc_return i64:$src0, tglobaladdr:$callee, i32:$fpdiff)]> {
   let Size = 4;
+  let FixedSize = 1;
   let isCall = 1;
   let isTerminator = 1;
   let isReturn = 1;
@@ -2431,6 +2447,11 @@ def : GCNPat <
 
 }
 
+def : GCNPat<
+  (i64 (DivergentUnaryFrag<bitreverse> i64:$a)),
+  (REG_SEQUENCE VReg_64,
+   (V_BFREV_B32_e64 (i32 (EXTRACT_SUBREG VReg_64:$a, sub1))), sub0,
+   (V_BFREV_B32_e64 (i32 (EXTRACT_SUBREG VReg_64:$a, sub0))), sub1)>;
 
 // Prefer selecting to max when legal, but using mul is always valid.
 let AddedComplexity = -5 in {
@@ -2589,12 +2610,12 @@ def : GCNPat <
 >;
 
 def : GCNPat <
-  (v2i16 (build_vector (i16 SReg_32:$src0), (i16 undef))),
+  (v2i16 (UniformBinFrag<build_vector> (i16 SReg_32:$src0), (i16 undef))),
   (COPY_TO_REGCLASS SReg_32:$src0, SReg_32)
 >;
 
 def : GCNPat <
-  (v2i16 (build_vector (i16 VGPR_32:$src0), (i16 undef))),
+  (v2i16 (DivergentBinFrag<build_vector> (i16 VGPR_32:$src0), (i16 undef))),
   (COPY_TO_REGCLASS VGPR_32:$src0, VGPR_32)
 >;
 
@@ -2759,18 +2780,18 @@ def : GCNPat <
 // an inline immediate than -c.
 // TODO: Also do for 64-bit.
 def : GCNPat<
-  (add i32:$src0, (i32 NegSubInlineConst32:$src1)),
+  (UniformBinFrag<add> i32:$src0, (i32 NegSubInlineConst32:$src1)),
   (S_SUB_I32 SReg_32:$src0, NegSubInlineConst32:$src1)
 >;
 
 def : GCNPat<
-  (add i32:$src0, (i32 NegSubInlineConst32:$src1)),
+  (DivergentBinFrag<add> i32:$src0, (i32 NegSubInlineConst32:$src1)),
   (V_SUB_U32_e64 VS_32:$src0, NegSubInlineConst32:$src1)> {
   let SubtargetPredicate = HasAddNoCarryInsts;
 }
 
 def : GCNPat<
-  (add i32:$src0, (i32 NegSubInlineConst32:$src1)),
+  (DivergentBinFrag<add> i32:$src0, (i32 NegSubInlineConst32:$src1)),
   (V_SUB_CO_U32_e64 VS_32:$src0, NegSubInlineConst32:$src1)> {
   let SubtargetPredicate = NotHasAddNoCarryInsts;
 }

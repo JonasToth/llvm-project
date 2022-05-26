@@ -61,6 +61,8 @@ namespace {
 class SerializeToHsacoPass
     : public PassWrapper<SerializeToHsacoPass, gpu::SerializeToBlobPass> {
 public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(SerializeToHsacoPass)
+
   SerializeToHsacoPass(StringRef triple, StringRef arch, StringRef features,
                        int optLevel);
   SerializeToHsacoPass(const SerializeToHsacoPass &other);
@@ -239,6 +241,7 @@ SerializeToHsacoPass::translateToLLVMIR(llvm::LLVMContext &llvmContext) {
     constant->setAlignment(llvm::MaybeAlign(bitwidth / 8));
   };
 
+  // Set up control variables in the module instead of linking in tiny bitcode
   if (needOcml) {
     // TODO(kdrewnia): Enable math optimizations once we have support for
     // `-ffast-math`-like options
@@ -271,13 +274,13 @@ SerializeToHsacoPass::translateToLLVMIR(llvm::LLVMContext &llvmContext) {
 
   Optional<SmallVector<std::unique_ptr<llvm::Module>, 3>> mbModules;
   std::string theRocmPath = getRocmPath();
-  llvm::SmallString<32> bitcodePath(std::move(theRocmPath));
+  llvm::SmallString<32> bitcodePath(theRocmPath);
   llvm::sys::path::append(bitcodePath, "amdgcn", "bitcode");
   mbModules = loadLibraries(bitcodePath, libraries, llvmContext);
 
   if (!mbModules) {
     getOperation()
-            .emitWarning("Could not load required device labraries")
+            .emitWarning("Could not load required device libraries")
             .attachNote()
         << "This will probably cause link-time or run-time failures";
     return ret; // We can still abort here
@@ -430,7 +433,7 @@ SerializeToHsacoPass::createHsaco(const SmallVectorImpl<char> &isaBinary) {
   llvm::FileRemover cleanupHsaco(tempHsacoFilename);
 
   std::string theRocmPath = getRocmPath();
-  llvm::SmallString<32> lldPath(std::move(theRocmPath));
+  llvm::SmallString<32> lldPath(theRocmPath);
   llvm::sys::path::append(lldPath, "llvm", "bin", "ld.lld");
   int lldResult = llvm::sys::ExecuteAndWait(
       lldPath,

@@ -603,6 +603,28 @@ define i64 @select_or(i32 %w0, i32 %w1, i64 %x2, i64 %x3) {
   ret i64 %sel
 }
 
+define float @select_or_float(i32 %w0, i32 %w1, float %x2, float %x3) {
+; CHECK-LABEL: select_or_float:
+; CHECK:       ; %bb.0:
+; CHECK-NEXT:    cmp w1, #5
+; CHECK-NEXT:    ccmp w0, w1, #8, eq
+; CHECK-NEXT:    fcsel s0, s0, s1, lt
+; CHECK-NEXT:    ret
+;
+; GISEL-LABEL: select_or_float:
+; GISEL:       ; %bb.0:
+; GISEL-NEXT:    mov w8, #5
+; GISEL-NEXT:    cmp w8, w1
+; GISEL-NEXT:    ccmp w0, w1, #8, eq
+; GISEL-NEXT:    fcsel s0, s0, s1, lt
+; GISEL-NEXT:    ret
+  %1 = icmp slt i32 %w0, %w1
+  %2 = icmp ne i32 5, %w1
+  %3 = or i1 %1, %2
+  %sel = select i1 %3, float %x2,float %x3
+  ret float %sel
+}
+
 define i64 @gccbug(i64 %x0, i64 %x1) {
 ; CHECK-LABEL: gccbug:
 ; CHECK:       ; %bb.0:
@@ -617,11 +639,10 @@ define i64 @gccbug(i64 %x0, i64 %x1) {
 ; GISEL:       ; %bb.0:
 ; GISEL-NEXT:    mov w8, #2
 ; GISEL-NEXT:    mov w9, #4
-; GISEL-NEXT:    mov w10, #1
 ; GISEL-NEXT:    cmp x0, #2
 ; GISEL-NEXT:    ccmp x0, x9, #4, ne
 ; GISEL-NEXT:    ccmp x1, xzr, #0, eq
-; GISEL-NEXT:    csel x0, x8, x10, eq
+; GISEL-NEXT:    csinc x0, x8, xzr, eq
 ; GISEL-NEXT:    ret
   %cmp0 = icmp eq i64 %x1, 0
   %cmp1 = icmp eq i64 %x0, 2
@@ -733,16 +754,12 @@ define i64 @select_noccmp1(i64 %v1, i64 %v2, i64 %v3, i64 %r) {
 
 @g = global i32 0
 
-; Should not use ccmp if we have to compute the or expression in an integer
-; register anyway because of other users.
 define i64 @select_noccmp2(i64 %v1, i64 %v2, i64 %v3, i64 %r) {
 ; CHECK-LABEL: select_noccmp2:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    cmp x0, #0
-; CHECK-NEXT:    cset w8, lt
-; CHECK-NEXT:    cmp x0, #13
-; CHECK-NEXT:    cset w9, gt
-; CHECK-NEXT:    orr w8, w8, w9
+; CHECK-NEXT:    ccmp x0, #13, #0, ge
+; CHECK-NEXT:    cset w8, gt
 ; CHECK-NEXT:    cmp w8, #0
 ; CHECK-NEXT:    csel x0, xzr, x3, ne
 ; CHECK-NEXT:    sbfx w8, w8, #0, #1
@@ -778,21 +795,17 @@ define i32 @select_noccmp3(i32 %v0, i32 %v1, i32 %v2) {
 ; CHECK-LABEL: select_noccmp3:
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    cmp w0, #0
-; CHECK-NEXT:    cset w8, lt
-; CHECK-NEXT:    cmp w0, #13
-; CHECK-NEXT:    cset w9, gt
+; CHECK-NEXT:    ccmp w0, #13, #0, ge
+; CHECK-NEXT:    cset w8, gt
 ; CHECK-NEXT:    cmp w0, #22
-; CHECK-NEXT:    cset w10, lt
-; CHECK-NEXT:    cmp w0, #44
-; CHECK-NEXT:    cset w11, gt
+; CHECK-NEXT:    mov w9, #44
+; CHECK-NEXT:    ccmp w0, w9, #0, ge
+; CHECK-NEXT:    cset w9, gt
 ; CHECK-NEXT:    cmp w0, #99
-; CHECK-NEXT:    cset w12, eq
-; CHECK-NEXT:    cmp w0, #77
-; CHECK-NEXT:    cset w13, eq
-; CHECK-NEXT:    orr w8, w8, w9
-; CHECK-NEXT:    orr w9, w10, w11
 ; CHECK-NEXT:    and w8, w8, w9
-; CHECK-NEXT:    orr w9, w12, w13
+; CHECK-NEXT:    mov w9, #77
+; CHECK-NEXT:    ccmp w0, w9, #4, ne
+; CHECK-NEXT:    cset w9, eq
 ; CHECK-NEXT:    tst w8, w9
 ; CHECK-NEXT:    csel w0, w1, w2, ne
 ; CHECK-NEXT:    ret

@@ -21,6 +21,7 @@
 #define cl_khr_subgroup_shuffle 1
 #define cl_khr_subgroup_shuffle_relative 1
 #define cl_khr_subgroup_clustered_reduce 1
+#define cl_khr_subgroup_rotate 1
 #define cl_khr_extended_bit_ops 1
 #define cl_khr_integer_dot_product 1
 #define __opencl_c_integer_dot_product_input_4x8bit 1
@@ -79,6 +80,11 @@
 // space overloads for builtin functions that take a pointer argument.
 #define __opencl_c_named_address_space_builtins 1
 #endif // !defined(__opencl_c_generic_address_space)
+
+#if defined(cl_intel_subgroups) || defined(cl_khr_subgroups) || defined(__opencl_c_subgroups)
+// Internal feature macro to provide subgroup builtins.
+#define __opencl_subgroup_builtins 1
+#endif
 
 // built-in scalar data types:
 
@@ -196,6 +202,9 @@ typedef double double4 __attribute__((ext_vector_type(4)));
 typedef double double8 __attribute__((ext_vector_type(8)));
 typedef double double16 __attribute__((ext_vector_type(16)));
 #endif
+
+// An internal alias for half, for use by OpenCLBuiltins.td.
+#define __half half
 
 #if defined(__OPENCL_CPP_VERSION__)
 #define NULL nullptr
