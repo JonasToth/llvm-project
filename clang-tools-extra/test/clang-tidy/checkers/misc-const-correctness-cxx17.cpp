@@ -15,19 +15,24 @@ void f() {
   auto [np_local0, np_local1] = MyPair<int, int>(42, 42);
   np_local0++;
   np_local1++;
+  // CHECK-FIXES-NOT: auto const [np_local0, np_local1]
 
   auto [np_local2, p_local0] = MyPair<double, double>(42., 42.);
   np_local2++;
+  // CHECK-FIXES-NOT: auto const [np_local2, p_local0]
 
   auto [p_local1, np_local3] = MyPair<double, double>(42., 42.);
   np_local3++;
+  // CHECK-FIXES-NOT: auto const [p_local1, np_local3]
 
   auto [p_local2, p_local3] = MyPair<double, double>(42., 42.);
+  // CHECK-FIXES-NOT: auto const [p_local2, p_local3]
 }
 
 void g() {
   int p_local0 = 42;
   // CHECK-MESSAGES: [[@LINE-1]]:3: warning: variable 'p_local0' of type 'int' can be declared 'const'
+  // CHECK-FIXES: int const p_local0 = 42;
 }
 
 template <typename SomeValue>
@@ -46,4 +51,5 @@ struct HardWorker {
 };
 struct TheContainer {
   HardWorker<Bingus> m_theOtherInstance;
+  // CHECK-FIXES-NOT: HardWorker<Bingus> const m_theOtherInstance
 };

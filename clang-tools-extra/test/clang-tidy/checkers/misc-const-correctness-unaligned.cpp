@@ -14,5 +14,6 @@ void scope() {
   // https://bugs.llvm.org/show_bug.cgi?id=51756
   S s;
   // CHECK-MESSAGES:[[@LINE-1]]:3: warning: variable 's' of type 'S' can be declared 'const'
+  // CHECK-FIXES: S const s;
   f(&s);
 }
