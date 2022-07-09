@@ -21,8 +21,8 @@ function(add_fp_unittest name)
 
   add_libc_unittest(
     ${name}
-    "${MATH_UNITTEST_UNPARSED_ARGUMENTS}"
     LINK_LIBRARIES "${MATH_UNITTEST_LINK_LIBRARIES}"
+    "${MATH_UNITTEST_UNPARSED_ARGUMENTS}"
   )
 endfunction(add_fp_unittest)
 
@@ -50,7 +50,6 @@ endif()
 # add_subdirectory(assert)
 # add_subdirectory(signal)
 add_subdirectory(stdio)
-add_subdirectory(threads)
 add_subdirectory(time)
 
 if(${LIBC_TARGET_OS} STREQUAL "linux")

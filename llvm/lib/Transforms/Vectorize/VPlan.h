@@ -25,7 +25,6 @@
 #ifndef LLVM_TRANSFORMS_VECTORIZE_VPLAN_H
 #define LLVM_TRANSFORMS_VECTORIZE_VPLAN_H
 
-#include "VPlanLoopInfo.h"
 #include "VPlanValue.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DepthFirstIterator.h"
@@ -38,9 +37,11 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/ADT/ilist.h"
 #include "llvm/ADT/ilist_node.h"
+#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/VectorUtils.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/FMF.h"
+#include "llvm/Transforms/Utils/LoopVersioning.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -201,8 +202,8 @@ struct VPTransformState {
   VPTransformState(ElementCount VF, unsigned UF, LoopInfo *LI,
                    DominatorTree *DT, IRBuilderBase &Builder,
                    InnerLoopVectorizer *ILV, VPlan *Plan)
-      : VF(VF), UF(UF), LI(LI), DT(DT), Builder(Builder), ILV(ILV), Plan(Plan) {
-  }
+      : VF(VF), UF(UF), LI(LI), DT(DT), Builder(Builder), ILV(ILV), Plan(Plan),
+        LVer(nullptr) {}
 
   /// The chosen Vectorization and Unroll Factors of the loop being vectorized.
   ElementCount VF;
@@ -298,6 +299,27 @@ struct VPTransformState {
     Iter->second[Instance.Part][CacheIdx] = V;
   }
 
+  /// Add additional metadata to \p To that was not present on \p Orig.
+  ///
+  /// Currently this is used to add the noalias annotations based on the
+  /// inserted memchecks.  Use this for instructions that are *cloned* into the
+  /// vector loop.
+  void addNewMetadata(Instruction *To, const Instruction *Orig);
+
+  /// Add metadata from one instruction to another.
+  ///
+  /// This includes both the original MDs from \p From and additional ones (\see
+  /// addNewMetadata).  Use this for *newly created* instructions in the vector
+  /// loop.
+  void addMetadata(Instruction *To, Instruction *From);
+
+  /// Similar to the previous function but it adds the metadata to a
+  /// vector of instructions.
+  void addMetadata(ArrayRef<Value *> To, Instruction *From);
+
+  /// Set the debug location in the builder using the debug location in \p V.
+  void setDebugLocFromInst(const Value *V);
+
   /// Hold state information used when constructing the CFG of the output IR,
   /// traversing the VPBasicBlocks and generating corresponding IR BasicBlocks.
   struct CFGState {
@@ -315,10 +337,6 @@ struct VPTransformState {
     /// A mapping of each VPBasicBlock to the corresponding BasicBlock. In case
     /// of replication, maps the BasicBlock of the last replica created.
     SmallDenseMap<VPBasicBlock *, BasicBlock *> VPBB2IRBB;
-
-    /// Vector of VPBasicBlocks whose terminator instruction needs to be fixed
-    /// up at the end of vector code generation.
-    SmallVector<VPBasicBlock *, 8> VPBBsToFix;
 
     CFGState() = default;
 
@@ -353,41 +371,13 @@ struct VPTransformState {
 
   /// The loop object for the current parent region, or nullptr.
   Loop *CurrentVectorLoop = nullptr;
-};
 
-/// VPUsers instance used by VPBlockBase to manage CondBit and the block
-/// predicate. Currently VPBlockUsers are used in VPBlockBase for historical
-/// reasons, but in the future the only VPUsers should either be recipes or
-/// live-outs.VPBlockBase uses.
-struct VPBlockUser : public VPUser {
-  VPBlockUser() : VPUser({}, VPUserID::Block) {}
-
-  VPValue *getSingleOperandOrNull() {
-    if (getNumOperands() == 1)
-      return getOperand(0);
-
-    return nullptr;
-  }
-  const VPValue *getSingleOperandOrNull() const {
-    if (getNumOperands() == 1)
-      return getOperand(0);
-
-    return nullptr;
-  }
-
-  void resetSingleOpUser(VPValue *NewVal) {
-    assert(getNumOperands() <= 1 && "Didn't expect more than one operand!");
-    if (!NewVal) {
-      if (getNumOperands() == 1)
-        removeLastOperand();
-      return;
-    }
-
-    if (getNumOperands() == 1)
-      setOperand(0, NewVal);
-    else
-      addOperand(NewVal);
-  }
+  /// LoopVersioning.  It's only set up (non-null) if memchecks were
+  /// used.
+  ///
+  /// This is currently only used to add no-alias metadata based on the
+  /// memchecks.  The actually versioning is performed manually.
+  std::unique_ptr<LoopVersioning> LVer;
 };
 
 /// VPBlockBase is the building block of the Hierarchical Control-Flow Graph.
@@ -409,16 +399,6 @@ class VPBlockBase {
 
   /// List of successor blocks.
   SmallVector<VPBlockBase *, 1> Successors;
-
-  /// Successor selector managed by a VPUser. For blocks with zero or one
-  /// successors, there is no operand. Otherwise there is exactly one operand
-  /// which is the branch condition.
-  VPBlockUser CondBitUser;
-
-  /// If the block is predicated, its predicate is stored as an operand of this
-  /// VPUser to maintain the def-use relations. Otherwise there is no operand
-  /// here.
-  VPBlockUser PredicateUser;
 
   /// VPlan containing the block. Can only be set on the entry block of the
   /// plan.
@@ -565,20 +545,6 @@ public:
     return getEnclosingBlockWithPredecessors()->getSinglePredecessor();
   }
 
-  /// \return the condition bit selecting the successor.
-  VPValue *getCondBit();
-  /// \return the condition bit selecting the successor.
-  const VPValue *getCondBit() const;
-  /// Set the condition bit selecting the successor.
-  void setCondBit(VPValue *CV);
-
-  /// \return the block's predicate.
-  VPValue *getPredicate();
-  /// \return the block's predicate.
-  const VPValue *getPredicate() const;
-  /// Set the block's predicate.
-  void setPredicate(VPValue *Pred);
-
   /// Set a given VPBlockBase \p Successor as the single successor of this
   /// VPBlockBase. This VPBlockBase is not added as predecessor of \p Successor.
   /// This VPBlockBase must have no successors.
@@ -588,14 +554,11 @@ public:
   }
 
   /// Set two given VPBlockBases \p IfTrue and \p IfFalse to be the two
-  /// successors of this VPBlockBase. \p Condition is set as the successor
-  /// selector. This VPBlockBase is not added as predecessor of \p IfTrue or \p
-  /// IfFalse. This VPBlockBase must have no successors.
-  void setTwoSuccessors(VPBlockBase *IfTrue, VPBlockBase *IfFalse,
-                        VPValue *Condition) {
+  /// successors of this VPBlockBase. This VPBlockBase is not added as
+  /// predecessor of \p IfTrue or \p IfFalse. This VPBlockBase must have no
+  /// successors.
+  void setTwoSuccessors(VPBlockBase *IfTrue, VPBlockBase *IfFalse) {
     assert(Successors.empty() && "Setting two successors when others exist.");
-    assert(Condition && "Setting two successors without condition!");
-    setCondBit(Condition);
     appendSuccessor(IfTrue);
     appendSuccessor(IfFalse);
   }
@@ -612,11 +575,8 @@ public:
   /// Remove all the predecessor of this block.
   void clearPredecessors() { Predecessors.clear(); }
 
-  /// Remove all the successors of this block and set to null its condition bit
-  void clearSuccessors() {
-    Successors.clear();
-    setCondBit(nullptr);
-  }
+  /// Remove all the successors of this block.
+  void clearSuccessors() { Successors.clear(); }
 
   /// The method which generates the output IR that correspond to this
   /// VPBlockBase, thereby "executing" the VPlan.
@@ -825,6 +785,7 @@ public:
     CanonicalIVIncrement,
     CanonicalIVIncrementNUW,
     BranchOnCount,
+    BranchOnCond
   };
 
 private:
@@ -913,6 +874,7 @@ public:
     case Instruction::Unreachable:
     case Instruction::Fence:
     case Instruction::AtomicRMW:
+    case VPInstruction::BranchOnCond:
     case VPInstruction::BranchOnCount:
       return false;
     default:
@@ -1074,24 +1036,22 @@ public:
 class VPWidenIntOrFpInductionRecipe : public VPRecipeBase, public VPValue {
   PHINode *IV;
   const InductionDescriptor &IndDesc;
-  bool NeedsScalarIV;
   bool NeedsVectorIV;
 
 public:
   VPWidenIntOrFpInductionRecipe(PHINode *IV, VPValue *Start, VPValue *Step,
                                 const InductionDescriptor &IndDesc,
-                                bool NeedsScalarIV, bool NeedsVectorIV)
+                                bool NeedsVectorIV)
       : VPRecipeBase(VPWidenIntOrFpInductionSC, {Start, Step}),
         VPValue(IV, this), IV(IV), IndDesc(IndDesc),
-        NeedsScalarIV(NeedsScalarIV), NeedsVectorIV(NeedsVectorIV) {}
+        NeedsVectorIV(NeedsVectorIV) {}
 
   VPWidenIntOrFpInductionRecipe(PHINode *IV, VPValue *Start, VPValue *Step,
                                 const InductionDescriptor &IndDesc,
-                                TruncInst *Trunc, bool NeedsScalarIV,
-                                bool NeedsVectorIV)
+                                TruncInst *Trunc, bool NeedsVectorIV)
       : VPRecipeBase(VPWidenIntOrFpInductionSC, {Start, Step}),
         VPValue(Trunc, this), IV(IV), IndDesc(IndDesc),
-        NeedsScalarIV(NeedsScalarIV), NeedsVectorIV(NeedsVectorIV) {}
+        NeedsVectorIV(NeedsVectorIV) {}
 
   ~VPWidenIntOrFpInductionRecipe() override = default;
 
@@ -1141,9 +1101,6 @@ public:
     const TruncInst *TruncI = getTruncInst();
     return TruncI ? TruncI->getType() : IV->getType();
   }
-
-  /// Returns true if a scalar phi needs to be created for the induction.
-  bool needsScalarIV() const { return NeedsScalarIV; }
 
   /// Returns true if a vector phi needs to be created for the induction.
   bool needsVectorIV() const { return NeedsVectorIV; }
@@ -1681,6 +1638,13 @@ public:
     // Mask is optional.
     return getNumOperands() == 1 ? getOperand(0) : nullptr;
   }
+
+  /// Returns true if the recipe uses scalars of operand \p Op.
+  bool usesScalars(const VPValue *Op) const override {
+    assert(is_contained(operands(), Op) &&
+           "Op must be an operand of the recipe");
+    return true;
+  }
 };
 
 /// VPPredInstPHIRecipe is a recipe for generating the phi nodes needed when
@@ -2102,6 +2066,14 @@ public:
   using VPBlockBase::print; // Get the print(raw_stream &O) version.
 #endif
 
+  /// If the block has multiple successors, return the branch recipe terminating
+  /// the block. If there are no or only a single successor, return nullptr;
+  VPRecipeBase *getTerminator();
+  const VPRecipeBase *getTerminator() const;
+
+  /// Returns true if the block is exiting it's parent region.
+  bool isExiting() const;
+
 private:
   /// Create an IR BasicBlock to hold the output instructions generated by this
   /// VPBasicBlock, and return it. Update the CFGState accordingly.
@@ -2507,9 +2479,6 @@ class VPlan {
   /// to be free when the plan's destructor is called.
   SmallVector<VPValue *, 16> VPValuesToFree;
 
-  /// Holds the VPLoopInfo analysis for this VPlan.
-  VPLoopInfo VPLInfo;
-
   /// Indicates whether it is safe use the Value2VPValue mapping or if the
   /// mapping cannot be used any longer, because it is stale.
   bool Value2VPValueEnabled = true;
@@ -2545,7 +2514,8 @@ public:
 
   /// Prepare the plan for execution, setting up the required live-in values.
   void prepareToExecute(Value *TripCount, Value *VectorTripCount,
-                        Value *CanonicalIVStartValue, VPTransformState &State);
+                        Value *CanonicalIVStartValue, VPTransformState &State,
+                        bool IsEpilogueVectorization);
 
   /// Generate the IR code for this VPlan.
   void execute(struct VPTransformState *State);
@@ -2641,10 +2611,6 @@ public:
     Value2VPValue.erase(V);
   }
 
-  /// Return the VPLoopInfo analysis for this VPlan.
-  VPLoopInfo &getVPLoopInfo() { return VPLInfo; }
-  const VPLoopInfo &getVPLoopInfo() const { return VPLInfo; }
-
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
   /// Print this VPlan to \p O.
   void print(raw_ostream &O) const;
@@ -2674,13 +2640,9 @@ public:
 
   /// Returns the VPRegionBlock of the vector loop.
   VPRegionBlock *getVectorLoopRegion() {
-    if (auto *R = dyn_cast<VPRegionBlock>(getEntry()))
-      return R;
     return cast<VPRegionBlock>(getEntry()->getSingleSuccessor());
   }
   const VPRegionBlock *getVectorLoopRegion() const {
-    if (auto *R = dyn_cast<VPRegionBlock>(getEntry()))
-      return R;
     return cast<VPRegionBlock>(getEntry()->getSingleSuccessor());
   }
 
@@ -2800,9 +2762,8 @@ public:
   /// Insert disconnected VPBlockBase \p NewBlock after \p BlockPtr. Add \p
   /// NewBlock as successor of \p BlockPtr and \p BlockPtr as predecessor of \p
   /// NewBlock, and propagate \p BlockPtr parent to \p NewBlock. \p BlockPtr's
-  /// successors are moved from \p BlockPtr to \p NewBlock and \p BlockPtr's
-  /// conditional bit is propagated to \p NewBlock. \p NewBlock must have
-  /// neither successors nor predecessors.
+  /// successors are moved from \p BlockPtr to \p NewBlock. \p NewBlock must
+  /// have neither successors nor predecessors.
   static void insertBlockAfter(VPBlockBase *NewBlock, VPBlockBase *BlockPtr) {
     assert(NewBlock->getSuccessors().empty() &&
            NewBlock->getPredecessors().empty() &&
@@ -2813,24 +2774,22 @@ public:
       disconnectBlocks(BlockPtr, Succ);
       connectBlocks(NewBlock, Succ);
     }
-    NewBlock->setCondBit(BlockPtr->getCondBit());
-    BlockPtr->setCondBit(nullptr);
     connectBlocks(BlockPtr, NewBlock);
   }
 
   /// Insert disconnected VPBlockBases \p IfTrue and \p IfFalse after \p
   /// BlockPtr. Add \p IfTrue and \p IfFalse as succesors of \p BlockPtr and \p
   /// BlockPtr as predecessor of \p IfTrue and \p IfFalse. Propagate \p BlockPtr
-  /// parent to \p IfTrue and \p IfFalse. \p Condition is set as the successor
-  /// selector. \p BlockPtr must have no successors and \p IfTrue and \p IfFalse
-  /// must have neither successors nor predecessors.
+  /// parent to \p IfTrue and \p IfFalse. \p BlockPtr must have no successors
+  /// and \p IfTrue and \p IfFalse must have neither successors nor
+  /// predecessors.
   static void insertTwoBlocksAfter(VPBlockBase *IfTrue, VPBlockBase *IfFalse,
-                                   VPValue *Condition, VPBlockBase *BlockPtr) {
+                                   VPBlockBase *BlockPtr) {
     assert(IfTrue->getSuccessors().empty() &&
            "Can't insert IfTrue with successors.");
     assert(IfFalse->getSuccessors().empty() &&
            "Can't insert IfFalse with successors.");
-    BlockPtr->setTwoSuccessors(IfTrue, IfFalse, Condition);
+    BlockPtr->setTwoSuccessors(IfTrue, IfFalse);
     IfTrue->setPredecessors({BlockPtr});
     IfFalse->setPredecessors({BlockPtr});
     IfTrue->setParent(BlockPtr->getParent());
@@ -2881,41 +2840,6 @@ public:
     }
     delete Block;
     return PredVPBB;
-  }
-
-  /// Returns true if the edge \p FromBlock -> \p ToBlock is a back-edge.
-  static bool isBackEdge(const VPBlockBase *FromBlock,
-                         const VPBlockBase *ToBlock, const VPLoopInfo *VPLI) {
-    assert(FromBlock->getParent() == ToBlock->getParent() &&
-           FromBlock->getParent() && "Must be in same region");
-    const VPLoop *FromLoop = VPLI->getLoopFor(FromBlock);
-    const VPLoop *ToLoop = VPLI->getLoopFor(ToBlock);
-    if (!FromLoop || !ToLoop || FromLoop != ToLoop)
-      return false;
-
-    // A back-edge is a branch from the loop latch to its header.
-    return ToLoop->isLoopLatch(FromBlock) && ToBlock == ToLoop->getHeader();
-  }
-
-  /// Returns true if \p Block is a loop latch
-  static bool blockIsLoopLatch(const VPBlockBase *Block,
-                               const VPLoopInfo *VPLInfo) {
-    if (const VPLoop *ParentVPL = VPLInfo->getLoopFor(Block))
-      return ParentVPL->isLoopLatch(Block);
-
-    return false;
-  }
-
-  /// Count and return the number of succesors of \p PredBlock excluding any
-  /// backedges.
-  static unsigned countSuccessorsNoBE(VPBlockBase *PredBlock,
-                                      VPLoopInfo *VPLI) {
-    unsigned Count = 0;
-    for (VPBlockBase *SuccBlock : PredBlock->getSuccessors()) {
-      if (!VPBlockUtils::isBackEdge(PredBlock, SuccBlock, VPLI))
-        Count++;
-    }
-    return Count;
   }
 
   /// Return an iterator range over \p Range which only includes \p BlockTy
@@ -3085,7 +3009,6 @@ bool onlyFirstLaneUsed(VPValue *Def);
 /// create a new one.
 VPValue *getOrCreateVPValueForSCEVExpr(VPlan &Plan, const SCEV *Expr,
                                        ScalarEvolution &SE);
-
 } // end namespace vputils
 
 } // end namespace llvm

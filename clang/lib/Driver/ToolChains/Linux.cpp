@@ -124,6 +124,8 @@ std::string Linux::getMultiarchTriple(const Driver &D,
     return "powerpc64-linux-gnu";
   case llvm::Triple::ppc64le:
     return "powerpc64le-linux-gnu";
+  case llvm::Triple::riscv64:
+    return "riscv64-linux-gnu";
   case llvm::Triple::sparc:
     return "sparc-linux-gnu";
   case llvm::Triple::sparcv9:
@@ -697,8 +699,11 @@ void Linux::AddIAMCUIncludeArgs(const ArgList &DriverArgs,
 }
 
 bool Linux::isPIEDefault(const llvm::opt::ArgList &Args) const {
-  return CLANG_DEFAULT_PIE_ON_LINUX || getTriple().isAndroid() ||
-         getTriple().isMusl() || getSanitizerArgs(Args).requiresPIE();
+  // TODO: Remove the special treatment for Flang once its frontend driver can
+  // generate position independent code.
+  return !getDriver().IsFlangMode() &&
+         (CLANG_DEFAULT_PIE_ON_LINUX || getTriple().isAndroid() ||
+          getTriple().isMusl() || getSanitizerArgs(Args).requiresPIE());
 }
 
 bool Linux::IsAArch64OutlineAtomicsDefault(const ArgList &Args) const {
