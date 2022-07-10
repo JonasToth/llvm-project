@@ -36,6 +36,22 @@ AST_MATCHER(ReferenceType, isSpelledAsLValue) {
 AST_MATCHER(Type, isDependentType) { return Node.isDependentType(); }
 } // namespace
 
+ConstCorrectnessCheck::ConstCorrectnessCheck(StringRef Name,
+                                             ClangTidyContext *Context)
+    : ClangTidyCheck(Name, Context),
+      AnalyzeValues(Options.get("AnalyzeValues", true)),
+      AnalyzeReferences(Options.get("AnalyzeReferences", true)),
+      WarnPointersAsValues(Options.get("WarnPointersAsValues", false)),
+      TransformValues(Options.get("TransformValues", true)),
+      TransformReferences(Options.get("TransformReferences", true)),
+      TransformPointersAsValues(
+          Options.get("TransformPointersAsValues", false)) {
+  if (AnalyzeValues == false && AnalyzeReferences == false)
+    this->configurationDiag("The check will not perform any analysis because "
+                            "both 'AnalyzeValues' and "
+                            "'AnalyzeReferences' are false.");
+}
+
 void ConstCorrectnessCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
   Options.store(Opts, "AnalyzeValues", AnalyzeValues);
   Options.store(Opts, "AnalyzeReferences", AnalyzeReferences);

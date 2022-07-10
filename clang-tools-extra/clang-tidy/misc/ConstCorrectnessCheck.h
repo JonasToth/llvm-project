@@ -24,15 +24,7 @@ namespace misc {
 /// http://clang.llvm.org/extra/clang-tidy/checks/misc-const-correctness.html
 class ConstCorrectnessCheck : public ClangTidyCheck {
 public:
-  ConstCorrectnessCheck(StringRef Name, ClangTidyContext *Context)
-      : ClangTidyCheck(Name, Context),
-        AnalyzeValues(Options.get("AnalyzeValues", true)),
-        AnalyzeReferences(Options.get("AnalyzeReferences", true)),
-        WarnPointersAsValues(Options.get("WarnPointersAsValues", false)),
-        TransformValues(Options.get("TransformValues", true)),
-        TransformReferences(Options.get("TransformReferences", true)),
-        TransformPointersAsValues(
-            Options.get("TransformPointersAsValues", false)) {}
+  ConstCorrectnessCheck(StringRef Name, ClangTidyContext *Context);
 
   // The rules for C and 'const' are different and incompatible for this check.
   bool isLanguageVersionSupported(const LangOptions &LangOpts) const override {
