@@ -181,10 +181,9 @@ void ConstCorrectnessCheck::check(const MatchFinder::MatchResult &Result) {
 
 void ConstCorrectnessCheck::registerScope(const CompoundStmt *LocalScope,
                                           ASTContext *Context) {
-  if (ScopesCache.find(LocalScope) == ScopesCache.end())
-    ScopesCache.insert(std::make_pair(
-        LocalScope,
-        std::make_unique<ExprMutationAnalyzer>(*LocalScope, *Context)));
+  auto &Analyzer = ScopesCache[LocalScope];
+  if (!Analyzer)
+    Analyzer = std::make_unique<ExprMutationAnalyzer>(*LocalScope, *Context);
 }
 
 } // namespace misc
