@@ -47,9 +47,10 @@ ConstCorrectnessCheck::ConstCorrectnessCheck(StringRef Name,
       TransformPointersAsValues(
           Options.get("TransformPointersAsValues", false)) {
   if (AnalyzeValues == false && AnalyzeReferences == false)
-    this->configurationDiag("The check will not perform any analysis because "
-                            "both 'AnalyzeValues' and "
-                            "'AnalyzeReferences' are false.");
+    this->configurationDiag(
+        "The check 'misc-const-correctness' will not "
+        "perform any analysis because both 'AnalyzeValues' and "
+        "'AnalyzeReferences' are false.");
 }
 
 void ConstCorrectnessCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
